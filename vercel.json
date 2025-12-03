@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
   "builds": [
     {
       "src": "package.json",
@@ -12,3 +13,9 @@
     }
   ]
 }
+=======
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/" }
+  ]
+}
+>>>>>>> e64e097 (Add vercel.json for SPA routing)
