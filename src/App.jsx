@@ -62,7 +62,6 @@ export default function App() {
       setTier('Newbie');
     }
 
-    // Then load hunts
     await fetchHunts();
     setDataLoaded(true);
   };
