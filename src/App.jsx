@@ -35,14 +35,13 @@ export default function App() {
     return () => listener?.subscription.unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (session) {
-      setDataLoaded(false);
-      loadProgressAndHunts();
-      const interval = setInterval(fetchHunts, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [session]);
+useEffect(() => {
+  if (session) {
+    setDataLoaded(false);
+    loadProgressAndHunts();
+    // Removed polling — new hunts added by admin will appear on next login/refresh
+  }
+}, [session]);
 
   const loadProgressAndHunts = async () => {
     const { data: progress } = await supabase
