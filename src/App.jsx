@@ -40,14 +40,14 @@ export default function App() {
       setDataLoaded(false);
       loadProgressAndHunts();
 
-      // Optional polling for new hunts added by admin (safe now)
+      // Optional polling for new admin-added hunts
       const interval = setInterval(fetchHunts, 10000);
       return () => clearInterval(interval);
     }
   }, [session]);
 
   const loadProgressAndHunts = async () => {
-    // 1. Load user progress FIRST
+    // Load progress FIRST
     const { data: progress } = await supabase
       .from('user_progress')
       .select('*')
@@ -69,14 +69,13 @@ export default function App() {
       setLastActive(null);
     }
 
-    // 2. Then load hunts
+    // Then load hunts
     const { data } = await supabase.from('hunts').select('*').order('date', { ascending: false });
     setHunts(data || []);
 
-    // 3. Apply filter only when both are ready
+    // Apply filter only when both are ready
     applyFilter(data || []);
 
-    // 4. Now show the UI
     setDataLoaded(true);
   };
 
@@ -146,6 +145,7 @@ export default function App() {
 
       const newTier = newTotal >= 20 ? 'Legend' : newTotal >= 10 ? 'Pro' : newTotal >= 5 ? 'Hunter' : 'Newbie';
 
+      // <-- THE CRITICAL FIX: prevent Supabase from doing a post-write SELECT
       await supabase.from('user_progress').upsert({
         user_id: session.user.id,
         completed_hunt_ids: newCompleted,
@@ -153,7 +153,7 @@ export default function App() {
         streak: newStreak,
         tier: newTier,
         last_active: today,
-      });
+      }, { returning: 'minimal' });
 
       setCompleted(newCompleted);
       setTotalHunts(newTotal);
