@@ -34,21 +34,39 @@ export default function App() {
 
   useEffect(() => {
     if (session) {
-      loadProgress();
-      fetchHunts();
+      loadEverything();
       const interval = setInterval(fetchHunts, 5000);
       return () => clearInterval(interval);
     }
   }, [session]);
 
-  const loadProgress = async () => {
-    const { data } = await supabase.from('user_progress').select('*').eq('user_id', session.user.id).single();
-    if (data) {
-      setCompleted(data.completed_hunt_ids || []);
-      setStreak(data.streak || 0);
-      setTotalHunts(data.total_hunts || 0);
-      setTier(data.tier || 'Newbie');
+  const loadEverything = async () => {
+    // Load progress first (use maybeSingle to avoid 406)
+    const { data: progress, error } = await supabase
+      .from('user_progress')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .maybeSingle();
+
+    if (error && error.code !== 'PGRST116') console.error(error);
+
+    if (progress) {
+      setCompleted(progress.completed_hunt_ids || []);
+      setStreak(progress.streak || 0);
+      setTotalHunts(progress.total_hunts || 0);
+      setTier(progress.tier || 'Newbie');
+    } else {
+      // New user — create default row
+      await supabase.from('user_progress').insert({
+        user_id: session.user.id,
+        completed_hunt_ids: [],
+        streak: 0,
+        total_hunts: 0,
+        tier: 'Newbie',
+      });
     }
+
+    fetchHunts();
   };
 
   const fetchHunts = async () => {
@@ -58,7 +76,7 @@ export default function App() {
   };
 
   const applyFilter = (allHunts) => {
-    let filtered = allHunts.filter(h => !completed.includes(h.id)); // FIXED: hide completed
+    let filtered = allHunts.filter(h => !completed.includes(h.id)); // hide completed
 
     if (activeFilter !== 'All') {
       filtered = filtered.filter(h => h.category === activeFilter);
@@ -116,9 +134,7 @@ export default function App() {
       setShowModal(false);
       setSelfieFile(null);
       setCurrentHunt(null);
-
-      // FIXED: Re-apply filter to hide the newly completed hunt
-      applyFilter(hunts);
+      applyFilter(hunts); // Refresh list
     } catch (error) {
       alert('Upload failed: ' + error.message);
     }
@@ -138,7 +154,10 @@ export default function App() {
     setLoading(false);
   };
 
-  const signOut = () => supabase.auth.signOut();
+  const signOut = async () => {
+    const { error } = await supabase.auth.signOut({ scope: 'global' });
+    if (error) console.error('Logout error:', error);
+  };
 
   if (!session) {
     return (
