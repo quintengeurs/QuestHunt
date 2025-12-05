@@ -30,8 +30,8 @@ export default function App() {
   const [dataLoaded, setDataLoaded] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data } ) => setSession(data.session));
-  const { data: listener } = supabase.auth.onAuthStateChange((_, s) => setSession(s));
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: listener } = supabase.auth.onAuthStateChange((_, s) => setSession(s));
     return () => listener?.subscription.unsubscribe();
   }, []);
 
@@ -117,12 +117,11 @@ export default function App() {
 
       const { data: { publicUrl } } = supabase.storage.from('selfies').getPublicUrl(fileName);
 
-      const { error: selfiesError } = await supabase.from('selfies').insert({
+      await supabase.from('selfies').insert({
         user_id: session.user.id,
         hunt_id: currentHunt.id,
         image_url: publicUrl,
       });
-      if (selfiesError) throw selfiesError;
 
       const newCompleted = [...new Set([...completed, currentHunt.id])];
       const newTotal = totalHunts + 1;
@@ -146,16 +145,27 @@ export default function App() {
 
       const newTier = newTotal >= 20 ? 'Legend' : newTotal >= 10 ? 'Pro' : newTotal >= 5 ? 'Hunter' : 'Newbie';
 
-      const { error: upsertError } = await supabase.from('user_progress').upsert({
-        user_id: session.user.id,
-        completed_hunt_ids: newCompleted,
-        total_hunts: newTotal,
-        streak: newStreak,
-        tier: newTier,
-        last_active: today,
-      }, { onConflict: 'user_id', returning: 'minimal' });
+      // Check if row exists, then update or insert
+      const { data: existing } = await supabase.from('user_progress').select('user_id').eq('user_id', session.user.id).maybeSingle();
 
-      if (upsertError) throw upsertError;
+      if (existing) {
+        await supabase.from('user_progress').update({
+          completed_hunt_ids: newCompleted,
+          total_hunts: newTotal,
+          streak: newStreak,
+          tier: newTier,
+          last_active: today,
+        }).eq('user_id', session.user.id);
+      } else {
+        await supabase.from('user_progress').insert({
+          user_id: session.user.id,
+          completed_hunt_ids: newCompleted,
+          total_hunts: newTotal,
+          streak: newStreak,
+          tier: newTier,
+          last_active: today,
+        });
+      }
 
       setCompleted(newCompleted);
       setTotalHunts(newTotal);
