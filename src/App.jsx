@@ -45,7 +45,6 @@ export default function App() {
   }, [session]);
 
   const loadProgressAndHunts = async () => {
-    // Load progress FIRST
     const { data: progress } = await supabase
       .from('user_progress')
       .select('*')
@@ -53,16 +52,13 @@ export default function App() {
       .maybeSingle();
 
     if (progress) {
-      // Critical fix: safely handle null or non-array for completed_hunt_ids
       const completedIds = progress.completed_hunt_ids;
       setCompleted(Array.isArray(completedIds) ? completedIds : []);
-
       setStreak(progress.streak || 0);
       setTotalHunts(progress.total_hunts || 0);
       setTier(progress.tier || 'Newbie');
       setLastActive(progress.last_active || null);
     } else {
-      // First-time user
       setCompleted([]);
       setStreak(0);
       setTotalHunts(0);
@@ -70,7 +66,6 @@ export default function App() {
       setLastActive(null);
     }
 
-    // Then load hunts
     await fetchHunts();
     setDataLoaded(true);
   };
@@ -81,8 +76,9 @@ export default function App() {
     applyFilter(data || []);
   };
 
-  const applyFilter = (allHunts) => {
-    let filtered = allHunts.filter(h => !completed.includes(h.id));
+  // Updated applyFilter — now accepts optional params for instant updates
+  const applyFilter = (allHunts = hunts, completedIds = completed) => {
+    let filtered = allHunts.filter(h => !completedIds.includes(h.id));
 
     if (activeFilter !== 'All') {
       filtered = filtered.filter(h => h.category === activeFilter);
@@ -160,7 +156,8 @@ export default function App() {
       setSelfieFile(null);
       setCurrentHunt(null);
 
-      applyFilter(hunts);
+      // Critical: pass the fresh completed list for instant removal
+      applyFilter(hunts, newCompleted);
     } catch (error) {
       alert('Upload failed: ' + error.message);
     } finally {
@@ -203,7 +200,7 @@ export default function App() {
           {authError && <p className="text-red-600 font-bold mb-6">{authError}</p>}
           <input type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} className="w-full p-5 mb-4 border-2 border-amber-200 rounded-2xl text-lg" />
           <input type="password" placeholder="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-5 mb-8 border-2 border-amber-200 rounded-2xl text-lg" />
-          <button onClick={signUp} disabled={loading} className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white py-6 rounded-2xl font-bold text-2xl shadow-lg mb-4">
+          <button onClick={signUp} disabled={loading} className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity- scram60 text-white py-6 rounded-2xl font-bold text-2xl shadow-lg mb-4">
             {loading ? 'Creating...' : 'Sign Up Free'}
           </button>
           <button onClick={signIn} disabled={loading} className="w-full bg-gray-700 hover:bg-gray-800 disabled:opacity-60 text-white py-6 rounded-2xl font-bold text-2xl shadow-lg">
