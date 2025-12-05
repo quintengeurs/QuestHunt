@@ -41,15 +41,28 @@ export default function App() {
     }
   }, [session, completed, activeFilter]); // Added dependencies — this fixes the flicker!
 
-  const loadProgress = async () => {
-    const { data } = await supabase.from('user_progress').select('*').eq('user_id', session.user.id).maybeSingle();
-    if (data) {
-      setCompleted(data.completed_hunt_ids || []);
-      setStreak(data.streak || 0);
-      setTotalHunts(data.total_hunts || 0);
-      setTier(data.tier || 'Newbie');
-    }
-  };
+const loadProgress = async () => {
+  const { data, error } = await supabase
+    .from('user_progress')
+    .select('*')
+    .eq('user_id', session.user.id)
+    .maybeSingle();  // Handles no row gracefully
+
+  if (error && error.code !== 'PGRST116') console.error('Progress load error:', error);
+
+  if (data) {
+    setCompleted(data.completed_hunt_ids || []);
+    setStreak(data.streak || 0);
+    setTotalHunts(data.total_hunts || 0);
+    setTier(data.tier || 'Newbie');
+  } else {
+    // Fallback for very old users (shouldn't happen now)
+    setCompleted([]);
+    setStreak(0);
+    setTotalHunts(0);
+    setTier('Newbie');
+  }
+};
 
   const fetchHunts = async () => {
     const { data } = await supabase.from('hunts').select('*').order('date', { ascending: false });
