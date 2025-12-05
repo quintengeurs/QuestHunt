@@ -25,7 +25,7 @@ export default function App() {
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showCompletedModal, setShowCompletedModal] = useState(false);
   const [selfieFile, setSelfieFile] = useState(null);
-  const [dataLoaded, setDataLoaded] = useState(false); // NEW: Prevents flash
+  const [dataLoaded, setDataLoaded] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -35,7 +35,7 @@ export default function App() {
 
   useEffect(() => {
     if (session) {
-      setDataLoaded(false); // Reset on session change
+      setDataLoaded(false);
       loadProgressAndHunts();
       const interval = setInterval(fetchHunts, 5000);
       return () => clearInterval(interval);
@@ -43,7 +43,6 @@ export default function App() {
   }, [session]);
 
   const loadProgressAndHunts = async () => {
-    // Load progress FIRST
     const { data: progress } = await supabase.from('user_progress').select('*').eq('user_id', session.user.id).maybeSingle();
     if (progress) {
       setCompleted(progress.completed_hunt_ids || []);
@@ -57,9 +56,8 @@ export default function App() {
       setTier('Newbie');
     }
 
-    // Then load hunts and apply filter
     await fetchHunts();
-    setDataLoaded(true); // Only show hunts after everything is ready
+    setDataLoaded(true);
   };
 
   const fetchHunts = async () => {
@@ -69,7 +67,7 @@ export default function App() {
   };
 
   const applyFilter = (allHunts) => {
-    let filtered = allHunts.filter(h => !completed.includes(h.id)); // hide completed
+    let filtered = allHunts.filter(h => !completed.includes(h.id));
 
     if (activeFilter !== 'All') {
       filtered = filtered.filter(h => h.category === activeFilter);
@@ -127,6 +125,8 @@ export default function App() {
       setShowModal(false);
       setSelfieFile(null);
       setCurrentHunt(null);
+
+      // FIXED: Re-apply filter with current hunts to hide the completed one immediately
       applyFilter(hunts);
     } catch (error) {
       alert('Upload failed: ' + error.message);
