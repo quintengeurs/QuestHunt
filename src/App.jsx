@@ -48,7 +48,7 @@ export default function App() {
   const [adminHunts, setAdminHunts] = useState([]);
   const [submissions, setSubmissions] = useState([]);
 
-  // Create Hunt Form State
+  // Create Hunt Form
   const [newHuntName, setNewHuntName] = useState('');
   const [newHuntRiddle, setNewHuntRiddle] = useState('');
   const [newHuntCode, setNewHuntCode] = useState('');
@@ -156,7 +156,7 @@ export default function App() {
     }
   }, [activeFilter, dataLoaded, completed, hunts]);
 
-  // ─── SELFIE UPLOAD WITH GEOLOCATION ─────────────
+  // ─── SELFIE UPLOAD ─────────────────────────────
   const uploadSelfie = async () => {
     if (!selfieFile || !currentHunt || uploading) return;
     setUploading(true);
@@ -228,7 +228,7 @@ export default function App() {
     }
   };
 
-  // ─── ADMIN FUNCTIONS ───────────────────────────
+  // ─── ADMIN: LOAD DATA ───────────────────────────
   const loadAdminData = async () => {
     const { data: allHunts } = await supabase.from('hunts').select('*');
     setAdminHunts(allHunts || []);
@@ -330,7 +330,7 @@ export default function App() {
     setSession(null);
   };
 
-  // ─── ADMIN PANEL WITH "CREATE HUNT" TAB ─────────────
+  // ─── ADMIN PANEL WITH ALL TABS (FIXED: HUNTS TAB NOW SHOWS) ─────
   if (showAdmin) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-50">
@@ -361,6 +361,27 @@ export default function App() {
             </button>
           </div>
 
+          {/* ALL HUNTS TAB — FIXED: NOW SHOWS */}
+          {adminTab === 'hunts' && (
+            <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {adminHunts.map(hunt => (
+                <div key={hunt.id} className="bg-white rounded-3xl shadow-2xl overflow-hidden transform hover:scale-105 transition">
+                  {hunt.photo ? (
+                    <img src={hunt.photo} alt={hunt.business_name} className="w-full h-64 object-cover" />
+                  ) : (
+                    <div className="bg-gray-200 border-2 border-dashed rounded-t-3xl w-full h-64" />
+                  )}
+                  <div className="p-6">
+                    <h3 className="text-2xl font-black text-amber-900 mb-2">{hunt.business_name}</h3>
+                    <p className="text-gray-600 mb-3 italic">"{hunt.riddle}"</p>
+                    <p className="text-sm text-gray-500 mb-2">Category: {hunt.category}</p>
+                    <p className="text-green-600 font-bold text-lg">Code: {hunt.code}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* CREATE HUNT TAB */}
           {adminTab === 'create' && (
             <div className="bg-white rounded-3xl shadow-2xl p-10 max-w-3xl mx-auto">
@@ -383,7 +404,7 @@ export default function App() {
             </div>
           )}
 
-          {/* SUBMISSIONS TAB (unchanged) */}
+          {/* SUBMISSIONS TAB */}
           {adminTab === 'submissions' && submissions.filter(s => !s.approved).length === 0 && (
             <p className="text-center text-4xl text-gray-500 py-32 font-light">No pending submissions</p>
           )}
@@ -411,7 +432,7 @@ export default function App() {
     );
   }
 
-  // ─── LOGIN SCREEN ──────────────────────────────
+  // ─── LOGIN, LOADING, MAIN APP (100% YOUR ORIGINAL) ─────
   if (!session) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50 flex items-center justify-center px-6">
@@ -442,14 +463,12 @@ export default function App() {
 
   const activeHuntsCount = hunts.filter(h => !completed.includes(h.id)).length;
 
-  // ─── MAIN APP UI (100% YOUR ORIGINAL) ─────────────
   return (
     <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50">
-      {/* HEADER WITH PROMINENT ADMIN BUTTON */}
+      {/* YOUR ORIGINAL HEADER */}
       <div className="bg-white/95 backdrop-blur-xl shadow-2xl border-b-8 border-amber-100 sticky top-0 z-50">
         <div className="max-w-5xl mx-auto px-6 py-6 flex justify-between items-center">
           <h1 className="text-5xl md:text-6xl font-black text-amber-900 tracking-tighter">Brew Hunt</h1>
-
           <div className="flex items-center gap-5">
             {isAdmin && (
               <button
@@ -465,19 +484,14 @@ export default function App() {
                 <div className="absolute inset-0 bg-white/30 translate-y-full group-hover:translate-y-0 transition-transform duration-500" />
               </button>
             )}
-
-            <button
-              onClick={signOut}
-              className="p-4 rounded-full bg-gray-100 hover:bg-gray-200 transition shadow-lg"
-              title="Log out"
-            >
+            <button onClick={signOut} className="p-4 rounded-full bg-gray-100 hover:bg-gray-200 transition shadow-lg" title="Log out">
               <LogOut className="w-7 h-7 text-gray-700" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* STATS CARD */}
+      {/* STATS + HUNT CARDS + MODAL — 100% UNCHANGED */}
       <div className="max-w-md mx-auto p-6">
         <div className="bg-white/90 backdrop-blur-lg rounded-3xl shadow-2xl p-10 text-center mb-8 border-4 border-amber-200">
           <div className="flex justify-between items-center">
@@ -498,7 +512,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* HUNT CARDS */}
         <div className="space-y-6">
           {filteredHunts.map(hunt => (
             <div key={hunt.id} className="bg-white rounded-3xl shadow-2xl overflow-hidden transform transition hover:scale-105">
@@ -521,7 +534,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* SELFIE MODAL */}
       {showModal && currentHunt && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-6">
           <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-10 text-center">
