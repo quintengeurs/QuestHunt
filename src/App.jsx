@@ -238,46 +238,57 @@ export default function App() {
   };
 
   // ─── CREATE NEW HUNT ───────────────────────────
-  const createHunt = async () => {
-    if (!newHuntName || !newHuntRiddle || !newHuntCode || !newHuntLat || !newHuntLon) {
-      alert('Please fill in all required fields');
-      return;
+const createHunt = async () => {
+  if (!newHuntName || !newHuntRiddle || !newHuntCode || !newHuntLat || !newHuntLon) {
+    alert('Please fill in all required fields');
+    return;
+  }
+
+  setCreatingHunt(true);
+  try {
+    let photoUrl = null;
+    if (newHuntPhoto) {
+      const fileExt = newHuntPhoto.name.split('.').pop();
+      const fileName = `hunt_${Date.now()}.${fileExt}`;
+      
+      // Use 'selfies' bucket (which definitely exists)
+      const { error: uploadError } = await supabase.storage
+        .from('selfies')
+        .upload(fileName, newHuntPhoto);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('selfies')
+        .getPublicUrl(fileName);
+
+      photoUrl = publicUrl;
     }
 
-    setCreatingHunt(true);
-    try {
-      let photoUrl = null;
-      if (newHuntPhoto) {
-        const fileExt = newHuntPhoto.name.split('.').pop();
-        const fileName = `hunt_${Date.now()}.${fileExt}`;
-        const { error: uploadError } = await supabase.storage.from('hunts').upload(fileName, newHuntPhoto);
-        if (uploadError) throw uploadError;
-        const { data: { publicUrl } } = supabase.storage.from('hunts').getPublicUrl(fileName);
-        photoUrl = publicUrl;
-      }
+    await supabase.from('hunts').insert({
+      business_name: newHuntName,
+      riddle: newHuntRiddle,
+      code: newHuntCode,
+      category: newHuntCategory || 'Food & Drink',
+      lat: parseFloat(newHuntLat),
+      lon: parseFloat(newHuntLon),
+      radius: parseInt(newHuntRadius) || 50,
+      photo: photoUrl,
+      date: new Date().toISOString(),
+    });
 
-      await supabase.from('hunts').insert({
-        business_name: newHuntName,
-        riddle: newHuntRiddle,
-        code: newHuntCode,
-        category: newHuntCategory || 'Food & Drink',
-        lat: parseFloat(newHuntLat),
-        lon: parseFloat(newHuntLon),
-        radius: parseInt(newHuntRadius) || 50,
-        photo: photoUrl,
-        date: new Date().toISOString(),
-      });
-
-      alert('Hunt created successfully!');
-      setNewHuntName(''); setNewHuntRiddle(''); setNewHuntCode(''); setNewHuntCategory(''); setNewHuntLat(''); setNewHuntLon(''); setNewHuntRadius('50'); setNewHuntPhoto(null);
-      loadAdminData();
-      setAdminTab('hunts');
-    } catch (err) {
-      alert('Failed to create hunt: ' + (err.message || 'Unknown error'));
-    } finally {
-      setCreatingHunt(false);
-    }
-  };
+    alert('Hunt created successfully!');
+    setNewHuntName(''); setNewHuntRiddle(''); setNewHuntCode(''); setNewHuntCategory(''); 
+    setNewHuntLat(''); setNewHuntLon(''); setNewHuntRadius('50'); setNewHuntPhoto(null);
+    loadAdminData();
+    setAdminTab('hunts');
+  } catch (err) {
+    console.error(err);
+    alert('Failed to create hunt: ' + (err.message || 'Unknown error'));
+  } finally {
+    setCreatingHunt(false);
+  }
+};
 
   const approveSelfie = async (id) => {
     const { data: selfie } = await supabase.from('selfies').select('user_id, hunt_id').eq('id', id).single();
