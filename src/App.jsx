@@ -36,7 +36,7 @@ export default function App() {
   const [lastActive, setLastActive] = useState(null);
   const [currentHunt, setCurrentHunt] = useState(null);
   const [showModal, setShowModal] = useState(false);
-  const [showCompletedModal, setShowCompletedModal] = useState(false); // Fixed: now works
+  const [showCompletedModal, setShowCompletedModal] = useState(false);
   const [selfieFile, setSelfieFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
@@ -92,7 +92,7 @@ export default function App() {
     }
   }, [session, showAdmin]);
 
-  // ─── LOAD USER DATA OR ADMIN DATA ───────────────
+  // ─── LOAD USER OR ADMIN DATA ───────────────────
   useEffect(() => {
     if (!session) return;
     if (showAdmin) {
@@ -130,11 +130,7 @@ export default function App() {
       setLastActive(lastActiveDate);
       setTier(currentTotal >= 20 ? 'Legend' : currentTotal >= 10 ? 'Pro' : currentTotal >= 5 ? 'Hunter' : 'Newbie');
 
-      const { data: huntsData } = await supabase
-        .from('hunts')
-        .select('*')
-        .order('date', { ascending: false });
-
+      const { data: huntsData } = await supabase.from('hunts').select('*').order('date', { ascending: false });
       setHunts(huntsData || []);
       applyFilter(huntsData || [], completedIds, activeFilter);
       setDataLoaded(true);
@@ -523,32 +519,55 @@ export default function App() {
           </div>
         </div>
 
-        {/* ACTIVE HUNTS */}
-        <div className="space-y-6">
+        {/* HUNT CARDS — FINAL PERFECT LAYOUT */}
+        <div className="space-y-8">
           {filteredHunts.map(hunt => {
             const isCompleted = completed.includes(hunt.id);
             return (
-              <div key={hunt.id} className={`bg-white rounded-3xl shadow-2xl overflow-hidden transform transition hover:scale-105 relative ${isCompleted ? 'opacity-80' : ''}`}>
-                {/* GREEN COMPLETED RIBBON */}
+              <div
+                key={hunt.id}
+                className={`bg-white rounded-3xl shadow-2xl overflow-hidden transform transition hover:scale-105 relative ${
+                  isCompleted ? 'opacity-80' : ''
+                }`}
+              >
+                {/* COMPLETED RIBBON */}
                 {isCompleted && (
-                  <div className="absolute top-0 right-0 bg-green-600 text-white px-8 py-3 rounded-bl-3xl font-black text-xl z-10 shadow-lg transform rotate-12 translate-x-4 -translate-y-2">
+                  <div className="absolute top-0 right-0 bg-green-600 text-white px-10 py-3 rounded-bl-3xl font-black text-xl z-20 shadow-lg transform rotate-12 translate-x-6 -translate-y-2">
                     COMPLETED
                   </div>
                 )}
-                {hunt.photo && <img src={hunt.photo} alt={hunt.business_name} className="w-full h-64 object-cover" />}
-                <div className="p-8">
-                  <h3 className="text-3xl font-black text-amber-900 mb-3">{hunt.business_name}</h3>
-                  <p className="text-gray-600 text-lg mb-4 italic">"{hunt.riddle}"</p>
-                  <div className="flex justify-between items-center">
-                    <span className="bg-amber-100 text-amber-800 px-4 py-2 rounded-full font-bold">{hunt.category}</span>
-                    <button
-                      onClick={() => { setCurrentHunt(hunt); setShowModal(true); }}
-                      className={`px-8 py-4 rounded-full font-bold text-xl shadow-lg flex items-center gap-3 ${isCompleted ? 'bg-gray-400 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-700 text-white'}`}
-                      disabled={isCompleted}
-                    >
-                      <MapPin /> {isCompleted ? 'Done' : 'Start Hunt'}
-                    </button>
-                  </div>
+
+                {/* IMAGE + CATEGORY TAG */}
+                <div className="relative">
+                  {hunt.photo ? (
+                    <img src={hunt.photo} alt={hunt.business_name} className="w-full h-64 object-cover" />
+                  ) : (
+                    <div className="w-full h-64 bg-gray-200 flex items-center justify-center">
+                      <p className="text-gray-500 text-xl">No photo</p>
+                    </div>
+                  )}
+                  <span className="absolute top-4 left-4 bg-amber-500 text-white px-5 py-2 rounded-full font-bold text-sm shadow-lg z-10">
+                    {hunt.category}
+                  </span>
+                </div>
+
+                {/* CONTENT + CENTERED BUTTON */}
+                <div className="p-8 pb-12 text-center">
+                  <h3 className="text-3xl font-black text-amber-900 mb-4">{hunt.business_name}</h3>
+                  <p className="text-gray-600 text-lg italic mb-10 leading-relaxed">"{hunt.riddle}"</p>
+
+                  <button
+                    onClick={() => { setCurrentHunt(hunt); setShowModal(true); }}
+                    disabled={isCompleted}
+                    className={`w-full max-w-xs mx-auto px-10 py-5 rounded-full font-bold text-xl shadow-2xl flex items-center justify-center gap-3 transition-all ${
+                      isCompleted
+                        ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
+                        : 'bg-amber-600 hover:bg-amber-700 text-white hover:shadow-amber-500/50'
+                    }`}
+                  >
+                    <MapPin size={24} />
+                    {isCompleted ? 'Completed' : 'Start Hunt'}
+                  </button>
                 </div>
               </div>
             );
@@ -556,7 +575,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* COMPLETED HUNTS MODAL — NOW WORKING */}
+      {/* COMPLETED HUNTS MODAL */}
       {showCompletedModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-6" onClick={() => setShowCompletedModal(false)}>
           <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-screen overflow-y-auto p-10" onClick={e => e.stopPropagation()}>
