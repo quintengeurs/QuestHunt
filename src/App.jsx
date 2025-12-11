@@ -55,6 +55,13 @@ export default function App() {
     }
   }, [session]);
 
+  // Re-apply filter whenever hunts, completed, or activeFilter changes
+  useEffect(() => {
+    if (dataLoaded) {
+      applyFilter(hunts, completed, activeFilter);
+    }
+  }, [hunts, completed, activeFilter, dataLoaded]);
+
   const loadProgressAndHunts = async () => {
     const { data: progress } = await supabase
       .from('user_progress')
@@ -62,9 +69,10 @@ export default function App() {
       .eq('user_id', session.user.id)
       .maybeSingle();
 
+    let completedIds = [];
     if (progress) {
-      const completedIds = progress.completed_hunt_ids;
-      setCompleted(Array.isArray(completedIds) ? completedIds : []);
+      completedIds = Array.isArray(progress.completed_hunt_ids) ? progress.completed_hunt_ids : [];
+      setCompleted(completedIds);
       setStreak(progress.streak || 0);
       setTotalHunts(progress.total_hunts || 0);
       setTier(progress.tier || 'Newbie');
@@ -78,22 +86,23 @@ export default function App() {
     }
 
     const { data } = await supabase.from('hunts').select('*').order('date', { ascending: false });
-    setHunts(data || []);
-    applyFilter(data || []);
+    const huntsData = data || [];
+    setHunts(huntsData);
+    applyFilter(huntsData, completedIds, activeFilter);
     setDataLoaded(true);
   };
 
   const fetchHunts = async () => {
     const { data } = await supabase.from('hunts').select('*').order('date', { ascending: false });
     setHunts(data || []);
-    applyFilter(data || []);
+    // Filter will be re-applied by useEffect
   };
 
-  const applyFilter = (allHunts, completedIds = completed) => {
+  const applyFilter = (allHunts, completedIds, filterCategory) => {
     let filtered = allHunts.filter(h => !completedIds.includes(h.id));
 
-    if (activeFilter !== 'All') {
-      filtered = filtered.filter(h => h.category === activeFilter);
+    if (filterCategory !== 'All') {
+      filtered = filtered.filter(h => h.category === filterCategory);
     }
 
     setFilteredHunts(filtered);
@@ -101,7 +110,7 @@ export default function App() {
 
   const filterHunts = (cat) => {
     setActiveFilter(cat);
-    applyFilter(hunts);
+    // Filter will be re-applied by useEffect
   };
 
   const startHunt = (hunt) => {
@@ -126,6 +135,7 @@ export default function App() {
 
       if (distance > currentHunt.radius) {
         alert('You are not at the spot!');
+        setUploading(false);
         return;
       }
 
@@ -171,7 +181,7 @@ export default function App() {
         streak: newStreak,
         tier: newTier,
         last_active: today,
-      }, { returning: 'minimal' });
+      }, { onConflict: 'user_id' });
 
       setCompleted(newCompleted);
       setTotalHunts(newTotal);
@@ -183,9 +193,9 @@ export default function App() {
       setSelfieFile(null);
       setCurrentHunt(null);
 
-      applyFilter(hunts, newCompleted);
+      // Filter will be re-applied by useEffect when completed changes
     } catch (error) {
-      if (error.code === 'PERMISSION_DENIED') {
+      if (error.code === 1) {
         alert('Location access is required to complete the hunt.');
       } else {
         alert('Upload failed: ' + error.message);
