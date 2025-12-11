@@ -71,26 +71,54 @@ export default function App() {
 
   const loadProgressAndHunts = async () => {
     try {
-      // Load user progress first
-      const { data: progress, error: progressError } = await supabase
+      // Load user progress - get all rows and take the most recent
+      const { data: progressRows, error: progressError } = await supabase
         .from('user_progress')
         .select('*')
         .eq('user_id', session.user.id)
-        .maybeSingle();
+        .order('last_active', { ascending: false });
 
       if (progressError) {
         console.error('Error loading progress:', progressError);
       }
 
       let completedIds = [];
+      // Take the first (most recent) row if multiple exist
+      const progress = progressRows && progressRows.length > 0 ? progressRows[0] : null;
+      
       if (progress) {
         completedIds = Array.isArray(progress.completed_hunt_ids) ? progress.completed_hunt_ids : [];
         console.log('Loaded progress:', progress); // Debug log
-        setCompleted(completedIds);
-        setStreak(progress.streak || 0);
-        setTotalHunts(progress.total_hunts || 0);
-        setTier(progress.tier || 'Newbie');
-        setLastActive(progress.last_active || null);
+        
+        // If there are multiple rows, merge all completed hunt IDs
+        if (progressRows.length > 1) {
+          console.log(`Warning: Found ${progressRows.length} progress rows, merging data`);
+          const allCompleted = new Set();
+          let maxTotal = 0;
+          let maxStreak = 0;
+          
+          progressRows.forEach(row => {
+            if (Array.isArray(row.completed_hunt_ids)) {
+              row.completed_hunt_ids.forEach(id => allCompleted.add(id));
+            }
+            maxTotal = Math.max(maxTotal, row.total_hunts || 0);
+            maxStreak = Math.max(maxStreak, row.streak || 0);
+          });
+          
+          completedIds = Array.from(allCompleted);
+          
+          setCompleted(completedIds);
+          setStreak(maxStreak);
+          setTotalHunts(completedIds.length); // Use actual count
+          setTier(completedIds.length >= 20 ? 'Legend' : completedIds.length >= 10 ? 'Pro' : completedIds.length >= 5 ? 'Hunter' : 'Newbie');
+          setLastActive(progress.last_active || null);
+        } else {
+          setCompleted(completedIds);
+          setStreak(progress.streak || 0);
+          setTotalHunts(progress.total_hunts || 0);
+          setTier(progress.tier || 'Newbie');
+          setLastActive(progress.last_active || null);
+        }
       } else {
         console.log('No progress found, using defaults'); // Debug log
         setCompleted([]);
