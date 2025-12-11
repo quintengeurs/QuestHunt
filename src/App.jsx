@@ -57,39 +57,67 @@ export default function App() {
 
   // Re-apply filter whenever hunts, completed, or activeFilter changes
   useEffect(() => {
-    if (dataLoaded) {
+    if (dataLoaded && hunts.length > 0) {
       applyFilter(hunts, completed, activeFilter);
     }
-  }, [hunts, completed, activeFilter, dataLoaded]);
+  }, [activeFilter, dataLoaded]);
+
+  // Separate effect for when completed changes
+  useEffect(() => {
+    if (dataLoaded && hunts.length > 0) {
+      applyFilter(hunts, completed, activeFilter);
+    }
+  }, [completed]);
 
   const loadProgressAndHunts = async () => {
-    const { data: progress } = await supabase
-      .from('user_progress')
-      .select('*')
-      .eq('user_id', session.user.id)
-      .maybeSingle();
+    try {
+      // Load user progress first
+      const { data: progress, error: progressError } = await supabase
+        .from('user_progress')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .maybeSingle();
 
-    let completedIds = [];
-    if (progress) {
-      completedIds = Array.isArray(progress.completed_hunt_ids) ? progress.completed_hunt_ids : [];
-      setCompleted(completedIds);
-      setStreak(progress.streak || 0);
-      setTotalHunts(progress.total_hunts || 0);
-      setTier(progress.tier || 'Newbie');
-      setLastActive(progress.last_active || null);
-    } else {
-      setCompleted([]);
-      setStreak(0);
-      setTotalHunts(0);
-      setTier('Newbie');
-      setLastActive(null);
+      if (progressError) {
+        console.error('Error loading progress:', progressError);
+      }
+
+      let completedIds = [];
+      if (progress) {
+        completedIds = Array.isArray(progress.completed_hunt_ids) ? progress.completed_hunt_ids : [];
+        console.log('Loaded progress:', progress); // Debug log
+        setCompleted(completedIds);
+        setStreak(progress.streak || 0);
+        setTotalHunts(progress.total_hunts || 0);
+        setTier(progress.tier || 'Newbie');
+        setLastActive(progress.last_active || null);
+      } else {
+        console.log('No progress found, using defaults'); // Debug log
+        setCompleted([]);
+        setStreak(0);
+        setTotalHunts(0);
+        setTier('Newbie');
+        setLastActive(null);
+      }
+
+      // Load hunts
+      const { data: huntsData, error: huntsError } = await supabase
+        .from('hunts')
+        .select('*')
+        .order('date', { ascending: false });
+
+      if (huntsError) {
+        console.error('Error loading hunts:', huntsError);
+      }
+
+      const allHunts = huntsData || [];
+      setHunts(allHunts);
+      applyFilter(allHunts, completedIds, activeFilter);
+      setDataLoaded(true);
+    } catch (error) {
+      console.error('Error in loadProgressAndHunts:', error);
+      setDataLoaded(true);
     }
-
-    const { data } = await supabase.from('hunts').select('*').order('date', { ascending: false });
-    const huntsData = data || [];
-    setHunts(huntsData);
-    applyFilter(huntsData, completedIds, activeFilter);
-    setDataLoaded(true);
   };
 
   const fetchHunts = async () => {
@@ -174,14 +202,32 @@ export default function App() {
 
       const newTier = newTotal >= 20 ? 'Legend' : newTotal >= 10 ? 'Pro' : newTotal >= 5 ? 'Hunter' : 'Newbie';
 
-      await supabase.from('user_progress').upsert({
+      console.log('Upserting progress:', { // Debug log
         user_id: session.user.id,
         completed_hunt_ids: newCompleted,
         total_hunts: newTotal,
         streak: newStreak,
         tier: newTier,
         last_active: today,
-      }, { onConflict: 'user_id' });
+      });
+
+      const { data: upsertData, error: upsertError } = await supabase
+        .from('user_progress')
+        .upsert({
+          user_id: session.user.id,
+          completed_hunt_ids: newCompleted,
+          total_hunts: newTotal,
+          streak: newStreak,
+          tier: newTier,
+          last_active: today,
+        }, { onConflict: 'user_id' });
+
+      if (upsertError) {
+        console.error('Upsert error:', upsertError);
+        throw upsertError;
+      }
+
+      console.log('Progress saved successfully'); // Debug log
 
       setCompleted(newCompleted);
       setTotalHunts(newTotal);
