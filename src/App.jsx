@@ -180,109 +180,112 @@ export default function App() {
     };
   }, [session, showAdmin]);
 
-  // ─── LOAD DATA ─────────────────────
-  useEffect(() => {
-    if (!session) return;
-    if (showAdmin) {
-      loadAdminData();
-    } else {
-      setDataLoaded(false);
-      loadProgressAndHunts();
-    }
-  }, [session, showAdmin]);
+// ─── LOAD DATA ─────────────────────
+useEffect(() => {
+  if (!session) return;
+  if (showAdmin) {
+    loadAdminData();
+  } else {
+    setDataLoaded(false);
+    loadProgressAndHunts();
+  }
+}, [session, showAdmin]);
 
-  const loadProgressAndHunts = useCallback(async () => {
-    try {
-      setError("");
+const loadProgressAndHunts = useCallback(async () => {
+  try {
+    setError("");
 
-      // Load user progress
-      const { data: progressRows, error: progressError } = await supabase
-        .from("user_progress")
-        .select("*")
-        .eq("user_id", session.user.id)
-        .order("last_active", { ascending: false });
+    // Load user progress (unchanged)
+    const { data: progressRows, error: progressError } = await supabase
+      .from("user_progress")
+      .select("*")
+      .eq("user_id", session.user.id)
+      .order("last_active", { ascending: false });
 
-      if (progressError) throw progressError;
+    if (progressError) throw progressError;
 
-      let completedIds: string[] = [];
-      const progress = progressRows?.[0] || null;
+    let completedIds: string[] = [];
+    const progress = progressRows?.[0] || null;
 
-      if (progress) {
-        completedIds = Array.isArray(progress.completed_hunt_ids) ? progress.completed_hunt_ids : [];
+    if (progress) {
+      completedIds = Array.isArray(progress.completed_hunt_ids) ? progress.completed_hunt_ids : [];
 
-        if (progressRows.length > 1) {
-          const all = new Set<string>();
-          let maxTotal = 0, maxStreak = 0;
-          progressRows.forEach((r: any) => {
-            if (Array.isArray(r.completed_hunt_ids))
-              r.completed_hunt_ids.forEach((id: string) => all.add(id));
-            maxTotal = Math.max(maxTotal, r.total_hunts || 0);
-            maxStreak = Math.max(maxStreak, r.streak || 0);
-          });
-          completedIds = Array.from(all);
-          setTotalHunts(completedIds.length);
-          setStreak(maxStreak);
-          for (let i = 1; i < progressRows.length; i++) {
-            await supabase.from("user_progress").delete().eq("id", progressRows[i].id);
-          }
-        } else {
-          setTotalHunts(progress.total_hunts || 0);
-          setStreak(progress.streak || 0);
+      if (progressRows.length > 1) {
+        const all = new Set<string>();
+        let maxTotal = 0, maxStreak = 0;
+        progressRows.forEach((r: any) => {
+          if (Array.isArray(r.completed_hunt_ids)) r.completed_hunt_ids.forEach((id: string) => all.add(id));
+          maxTotal = Math.max(maxTotal, r.total_hunts || 0);
+          maxStreak = Math.max(maxStreak, r.streak || 0);
+        });
+        completedIds = Array.from(all);
+        setTotalHunts(completedIds.length);
+        setStreak(maxStreak);
+        for (let i = 1; i < progressRows.length; i++) {
+          await supabase.from("user_progress").delete().eq("id", progressRows[i].id);
         }
-        setCompleted(completedIds);
-        setTier(
-          completedIds.length >= 20
-            ? "Legend"
-            : completedIds.length >= 10
-            ? "Pro"
-            : completedIds.length >= 5
-            ? "Hunter"
-            : "Newbie"
-        );
-        setLastActive(progress.last_active || null);
       } else {
-        setCompleted([]);
-        setStreak(0);
-        setTotalHunts(0);
-        setTier("Newbie");
-        setLastActive(null);
+        setTotalHunts(progress.total_hunts || 0);
+        setStreak(progress.streak || 0);
       }
-
-      // ─── LOAD HUNTS: TODAY AND FUTURE ONLY ─────────────────────
-      const today = new Date().toISOString().split("T")[0]; // "2025-12-11"
-
-      const { data: huntsData, error: huntsError } = await supabase
-        .from("hunts")
-        .select("*")
-        .gte("date", today)           // Show hunts from TODAY onwards
-        .order("date", { ascending: false });
-
-      if (huntsError) throw huntsError;
-
-      setHunts(huntsData || []);
-      applyFilter(huntsData || [], completedIds, activeFilter);
-      setDataLoaded(true);
-    } catch (e: any) {
-      console.error("Load error:", e);
-      setError("Failed to load hunts. Please refresh.");
-      setDataLoaded(true);
+      setCompleted(completedIds);
+      setTier(
+        completedIds.length >= 20 ? "Legend" : completedIds.length >= 10 ? "Pro" : completedIds.length >= 5 ? "Hunter" : "Newbie"
+      );
+      setLastActive(progress.last_active || null);
+    } else {
+      setCompleted([]);
+      setStreak(0);
+      setTotalHunts(0);
+      setTier("Newbie");
+      setLastActive(null);
     }
-  }, [session, activeFilter]);
 
-  // Also update fetchHunts (used by realtime)
-  const fetchHunts = useCallback(async () => {
-    const today = new Date().toISOString().split("T")[0];
+    // FIXED: Load hunts from TODAY onwards (proper ISO date)
+    const todayISO = new Date().toISOString().split('T')[0];  // "2025-12-12"
+    console.log('Fetching hunts >=', todayISO);  // Debug log
 
-    const { data, error } = await supabase
+    const { data: huntsData, error: huntsError } = await supabase
       .from("hunts")
       .select("*")
-      .gte("date", today)
+      .gte("date", todayISO)  // Hunts from today + future
       .order("date", { ascending: false });
 
-    if (!error && data) {
-      setHunts(data);
+    if (huntsError) {
+      console.error('Hunts error:', huntsError);  // Debug
+      throw huntsError;
     }
-  }, []);
+
+    console.log('Loaded hunts:', huntsData);  // Debug: Check console
+
+    setHunts(huntsData || []);
+    applyFilter(huntsData || [], completedIds, activeFilter);
+    setDataLoaded(true);
+  } catch (e: any) {
+    console.error("Load error:", e);
+    setError("Failed to load hunts. Please refresh.");
+    setDataLoaded(true);
+  }
+}, [session, activeFilter]);
+
+// FIXED: Realtime fetch (same query)
+const fetchHunts = useCallback(async () => {
+  const todayISO = new Date().toISOString().split('T')[0];
+  console.log('Realtime fetching hunts >=', todayISO);  // Debug
+
+  const { data, error } = await supabase
+    .from("hunts")
+    .select("*")
+    .gte("date", todayISO)
+    .order("date", { ascending: false });
+
+  if (error) {
+    console.error('Realtime hunts error:', error);
+  } else {
+    console.log('Realtime hunts loaded:', data);  // Debug
+    setHunts(data || []);
+  }
+}, []);
 
   // ─── SELFIE UPLOAD ─────────────────────
   const uploadSelfie = useCallback(async () => {
