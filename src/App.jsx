@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react";
+import { useState, useEffect, useCallback } from "react"; // Fixed quote
 import { createClient } from "@supabase/supabase-js";
-import { LogOut, Trophy, Shield, Check, X, AlertCircle } from "lucide-react";
+import { LogOut, Trophy, Shield, Check, X, AlertCircle, Camera } from "lucide-react";
 
 const supabaseUrl = "https://eeboxlitezqgjyrnssgx.supabase.co";
 const supabaseAnonKey =
@@ -19,7 +19,7 @@ const getSafePhotoUrl = (url: string | null): string => {
   return "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=800&h=600&fit=crop";
 };
 
-function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+function calculateDistance(lat1: number, lon1: number, lat2:uarios number, lon2: number): number {
   const R = 6371000;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
@@ -163,7 +163,7 @@ export default function App() {
     }
   }, [session, showAdmin]);
 
-  const loadProgressAndHunts = async () => {
+  const loadProgressAndHunts = useCallback(async () => {
     try {
       setError("");
       const { data: progressRows, error: progressError } = await supabase
@@ -221,7 +221,7 @@ export default function App() {
       const today = getTodayLocalDate();
       const { data: huntsData, error: huntsError } = await supabase
         .from("hunts")
-        .select("*", { noCache: true })
+        .select("*")
         .lte("date", today)
         .order("date", { ascending: false });
 
@@ -235,19 +235,17 @@ export default function App() {
       setError("Failed to load hunts. Please refresh.");
       setDataLoaded(true);
     }
-  };
+  }, [session, activeFilter]);
 
-  const fetchHunts = async () => {
+  const fetchHunts = useCallback(async () => {
     const today = getTodayLocalDate();
-    supabase
+    const { data, error } = await supabase
       .from("hunts")
-      .select("*", { noCache: true })
+      .select("*")
       .lte("date", today)
-      .order("date", { ascending: false })
-      .then(({ data, error }) => {
-        if (!error && data) setHunts(data);
-      });
-  };
+      .order("date", { ascending: false });
+    if (!error && data) setHunts(data);
+  }, []);
 
   const applyFilter = useCallback(
     (allHunts: any[], completedIds: string[], filterCategory: string) => {
@@ -259,11 +257,13 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (dataLoaded) applyFilter(hunts, completed, activeFilter);
+    if (dataLoaded && hunts.length > 0) {
+      applyFilter(hunts, completed, activeFilter);
+    }
   }, [hunts, completed, activeFilter, dataLoaded, applyFilter]);
 
   // ─── SELFIE UPLOAD ─────────────────────
-  const uploadSelfie = async () => {
+  const uploadSelfie = useCallback(async () => {
     if (!selfieFile || !currentHunt || uploading) return;
     if (completed.includes(currentHunt.id)) {
       alert("You have already completed this hunt!");
@@ -321,8 +321,13 @@ export default function App() {
       const newCompleted = [...new Set([...completed, currentHunt.id])];
       const today = getTodayLocalDate();
       let newStreak = streak;
-      if (lastActive === getYesterdayLocalDate()) newStreak = streak + 1;
-      if (lastActive === today) newStreak = streak;
+
+      if (lastActive === getYesterdayLocalDate()) {
+        newStreak = streak + 1;
+      } else if (lastActive !== today) {
+        newStreak = 1; // Reset streak if missed a day
+      }
+      // Otherwise: same day → keep current streak
 
       const newTier = newCompleted.length >= 20 ? "Legend" : newCompleted.length >= 10 ? "Pro" : newCompleted.length >= 5 ? "Hunter" : "Newbie";
 
@@ -353,10 +358,10 @@ export default function App() {
     } finally {
       setUploading(false);
     }
-  };
+  }, [selfieFile, currentHunt, uploading, completed, session, streak, lastActive]);
 
   // ─── LEADERBOARD ─────────────────────
-  const loadLeaderboard = async () => {
+  const loadLeaderboard = useCallback(async () => {
     setLoadingLeaderboard(true);
     try {
       const { data, error } = await supabase
@@ -369,12 +374,20 @@ export default function App() {
 
       const enriched = await Promise.all(
         (data || []).map(async (item: any) => {
-          const { data: userData } = await supabase.auth.admin.getUserById(item.user_id);
-          return {
-            email: userData?.user?.email || "Anonymous",
-            hunts: item.total_hunts,
-            tier: item.tier,
-          };
+          try {
+            const { data: userData } = await supabase.auth.admin.getUserById(item.user_id);
+            return {
+              email: userData?.user?.email || "Anonymous",
+              hunts: item.total_hunts,
+              tier: item.tier,
+            };
+          } catch {
+            return {
+              email: "Deleted User",
+              hunts: item.total_hunts,
+              tier: item.tier,
+            };
+          }
         })
       );
 
@@ -384,18 +397,20 @@ export default function App() {
     } finally {
       setLoadingLeaderboard(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    if (showLeaderboard && leaderboardData.length === 0) loadLeaderboard();
-  }, [showLeaderboard]);
+    if (showLeaderboard && leaderboardData.length === 0) {
+      loadLeaderboard();
+    }
+  }, [showLeaderboard, leaderboardData.length, loadLeaderboard]);
 
   // ─── ADMIN DATA ─────────────────────
-  const loadAdminData = async () => {
+  const loadAdminData = useCallback(async () => {
     try {
       const { data: allHunts } = await supabase
         .from("hunts")
-        .select("*", { noCache: true })
+        .select("*")
         .order("date", { ascending: false });
       setAdminHunts(allHunts || []);
 
@@ -415,10 +430,10 @@ export default function App() {
     } catch (e) {
       setError("Failed to load admin data");
     }
-  };
+  }, []);
 
-  // ─── CREATE HUNT (hunts bucket) ─────────────────────
-  const createHunt = async () => {
+  // ─── CREATE HUNT ─────────────────────
+  const createHunt = useCallback(async () => {
     if (!newHuntBusinessName.trim() || !newHuntRiddle.trim() || !newHuntCode.trim() || !newHuntLat || !newHuntLon) {
       alert("Please fill all required fields");
       return;
@@ -480,10 +495,10 @@ export default function App() {
     } finally {
       setCreatingHunt(false);
     }
-  };
+  }, [newHuntDate, newHuntCategory, newHuntRiddle, newHuntBusinessName, newHuntCode, newHuntDiscount, newHuntLat, newHuntLon, newHuntRadius, newHuntPhoto, loadAdminData]);
 
   // ─── ADMIN APPROVE / REJECT ─────────────────────
-  const approveSelfie = async (id: string) => {
+  const approveSelfie = useCallback(async (id: string) => {
     setProcessingSubmission(id);
     try {
       const { error } = await supabase.from("selfies").update({ approved: true }).eq("id", id);
@@ -494,10 +509,10 @@ export default function App() {
     } finally {
       setProcessingSubmission(null);
     }
-  };
+  }, [loadAdminData]);
 
-  const rejectSelfie = async (id: string) => {
-    if (!confirm("Reject this submission?")) return;
+  const rejectSelfie = useCallback(async (id: string) => {
+    if (!window.confirm("Reject this submission?")) return;
     setProcessingSubmission(id);
     try {
       const { error } = await supabase.from("selfies").delete().eq("id", id);
@@ -508,7 +523,7 @@ export default function App() {
     } finally {
       setProcessingSubmission(null);
     }
-  };
+  }, [loadAdminData]);
 
   // ─── AUTH ─────────────────────
   const signUp = async () => {
@@ -554,7 +569,7 @@ export default function App() {
   };
 
   const signOut = async () => {
-    if (!confirm("Sign out?")) return;
+    if (!window.confirm("Sign out?")) return;
     await supabase.auth.signOut();
     setSession(null);
   };
@@ -565,14 +580,15 @@ export default function App() {
       <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-50">
         <div className="bg-white shadow-xl p-6 sticky top-0 z-50 flex justify-between items-center">
           <h1 className="text-4xl font-black text-amber-900 flex items-center gap-4">
-            Shield Admin Panel
+            <Shield className="w-12 h-12" />
+            Admin Panel
           </h1>
           <div className="flex gap-4">
             <button onClick={() => setShowAdmin(false)} className="px-6 py-3 bg-gray-200 hover:bg-gray-300 rounded-full font-bold">
               Back to App
             </button>
-            <button onClick={signOut} className="text-gray-600 hover:text-gray-800">
-              LogOut
+            <button onClick={signOut} className="text-gray-600 hover:text-gray-800 flex items-center gap-2">
+              <LogOut size={20} /> Log Out
             </button>
           </div>
         </div>
@@ -645,16 +661,24 @@ export default function App() {
                           <button
                             onClick={() => approveSelfie(sub.id)}
                             disabled={processingSubmission === sub.id}
-                            className="flex-1 bg-green-600 hover:bg-green-700 text-white py-5 rounded-2xl font-bold text-xl flex items-center justify-center gap-3"
+                            className={`flex-1 py-5 rounded-2xl font-bold text-xl flex items-center justify-center gap-3 transition ${
+                              processingSubmission === sub.id
+                                ? "bg-gray-400 text-gray-700 cursor-not-allowed"
+                                : "bg-green-600 hover:bg-green-700 text-white"
+                            }`}
                           >
-                            Check {processingSubmission === sub.id ? "Processing..." : "Approve"}
+                            <Check size={24} /> {processingSubmission === sub.id ? "Processing..." : "Approve"}
                           </button>
                           <button
                             onClick={() => rejectSelfie(sub.id)}
                             disabled={processingSubmission === sub.id}
-                            className="flex-1 bg-red-600 hover:bg-red-700 text-white py-5 rounded-2xl font-bold text-xl flex items-center justify-center gap-3"
+                            className={`flex-1 py-5 rounded-2xl font-bold text-xl flex items-center justify-center gap-3 transition ${
+                              processingSubmission === sub.id
+                                ? "bg-gray-400 text-gray-700 cursor-not-allowed"
+                                : "bg-red-600 hover:bg-red-700 text-white"
+                            }`}
                           >
-                            X {processingSubmission === sub.id ? "Processing..." : "Reject"}
+                            <X size={24} /> {processingSubmission === sub.id ? "Processing..." : "Reject"}
                           </button>
                         </div>
                       </div>
@@ -776,7 +800,7 @@ export default function App() {
               <button
                 onClick={createHunt}
                 disabled={creatingHunt}
-                className="mt-10 w-full bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white py-6 rounded-2xl font-black text-2xl"
+                className="mt-10 w-full bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white py-6 rounded-2xl font-black text-2xl transition"
               >
                 {creatingHunt ? "Creating..." : "Create Hunt"}
               </button>
@@ -864,11 +888,11 @@ export default function App() {
                 onClick={() => setShowAdmin(true)}
                 className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-3 rounded-full font-bold flex items-center gap-2 shadow-lg"
               >
-                Shield Admin
+                <Shield size={20} /> Admin
               </button>
             )}
-            <button onClick={signOut} className="text-gray-600 hover:text-gray-800">
-              LogOut
+            <button onClick={signOut} className="text-gray-600 hover:text-gray-800 flex items-center gap-2">
+              <LogOut size={20} /> Log Out
             </button>
           </div>
         </div>
@@ -933,7 +957,7 @@ export default function App() {
             onClick={() => setShowLeaderboard(true)}
             className="text-amber-700 underline font-bold text-xl flex items-center gap-2 mx-auto hover:text-amber-900"
           >
-            Trophy Leaderboard
+            <Trophy className="w-6 h-6" /> Leaderboard
           </button>
         </div>
 
@@ -1052,15 +1076,15 @@ export default function App() {
             />
             <label
               htmlFor="camera"
-              className="w-44 h-44 bg-green-600 hover:bg-green-700 text-white rounded-full flex items-center justify-center shadow-2xl text-5xl cursor-pointer mx-auto mb-12"
+              className="w-44 h-44 bg-green-600 hover:bg-green-700 text-white rounded-full flex items-center justify-center shadow-2xl cursor-pointer mx-auto mb-12"
             >
-              <span className="text-2xl font-bold">Camera</span>
+              <Camera className="w-20 h-20" />
             </label>
 
             <button
               onClick={uploadSelfie}
               disabled={!selfieFile || uploading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white py-6 rounded-2xl font-black text-2xl"
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white py-6 rounded-2xl font-black text-2xl transition"
             >
               {uploading ? "Uploading..." : "Submit & Unlock Code"}
             </button>
