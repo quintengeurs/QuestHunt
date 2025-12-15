@@ -526,9 +526,11 @@ export default function App() {
     try {
       const { error } = await supabase.from("selfies").update({ approved: true }).eq("id", id);
       if (error) throw error;
+      alert("Selfie approved successfully!");
       await loadAdminData();
-    } catch {
-      alert("Failed to approve");
+    } catch (err: any) {
+      alert("Failed to approve: " + (err.message || "Unknown error"));
+      console.error("Approve error:", err);
     } finally {
       setProcessingSubmission(null);
     }
