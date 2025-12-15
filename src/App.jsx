@@ -414,10 +414,16 @@ export default function App() {
       if (error) throw error;
 
       const userIds = data.map((item: any) => item.user_id);
-      const { data: profiles } = await supabase
+      
+      // Get profiles directly instead of using admin API
+      const { data: profiles, error: profilesError } = await supabase
         .from("profiles")
         .select("id, username, full_name")
         .in("id", userIds);
+
+      if (profilesError) {
+        console.error('Profiles error:', profilesError);
+      }
 
       const profileMap = Object.fromEntries((profiles || []).map((p: any) => [p.id, p]));
 
@@ -1034,91 +1040,6 @@ export default function App() {
     );
   }
 
-
-
-
-
-
-
-
-
-  // Add this state at the top with other useState declarations
-const [testResult, setTestResult] = useState('');
-
-// Add this function with other functions
-const testBucketAccess = async () => {
-  setTestResult('Testing...');
-  try {
-    // Test 1: List buckets
-    const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
-    console.log('Buckets:', buckets, bucketsError);
-    
-    if (bucketsError) {
-      setTestResult(`❌ List buckets failed: ${bucketsError.message}`);
-      return;
-    }
-    
-    const selfiesBucket = buckets?.find(b => b.name === 'selfies');
-    if (!selfiesBucket) {
-      setTestResult(`❌ Selfies bucket not found. Available: ${buckets?.map(b => b.name).join(', ')}`);
-      return;
-    }
-    
-    // Test 2: List files in selfies bucket
-    const { data: files, error: filesError } = await supabase.storage
-      .from('selfies')
-      .list('', { limit: 1 });
-    
-    console.log('List files:', files, filesError);
-    
-    if (filesError) {
-      setTestResult(`❌ List files failed: ${filesError.message}`);
-      return;
-    }
-    
-    // Test 3: Try to upload a tiny test file
-    const testBlob = new Blob(['test'], { type: 'text/plain' });
-    const testFile = new File([testBlob], 'test.txt');
-    const testFileName = `test_${session.user.id}_${Date.now()}.txt`;
-    
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('selfies')
-      .upload(testFileName, testFile);
-    
-    console.log('Upload test:', uploadData, uploadError);
-    
-    if (uploadError) {
-      setTestResult(`❌ Upload failed: ${uploadError.message} (${JSON.stringify(uploadError)})`);
-      return;
-    }
-    
-    // Success! Clean up
-    await supabase.storage.from('selfies').remove([testFileName]);
-    setTestResult('✅ All tests passed! Bucket is accessible.');
-    
-  } catch (err: any) {
-    console.error('Test error:', err);
-    setTestResult(`❌ Test error: ${err.message}`);
-  }
-};
-
-// Add this button somewhere visible in your UI (e.g., near the admin button):
-<button 
-  onClick={testBucketAccess}
-  className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-full font-bold"
->
-  🧪 Test Bucket
-</button>
-
-{testResult && (
-  <div className="mt-4 p-4 bg-gray-100 rounded-lg">
-    <p className="font-mono text-sm">{testResult}</p>
-  </div>
-)}
-
-
-
-  
   if (!dataLoaded) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50 flex items-center justify-center">
