@@ -152,100 +152,6 @@ export default function App() {
     return () => listener?.subscription.unsubscribe();
   }, []);
 
-
-
-
-
-
-
-
-
-
-
-  // Add this state at the top with other useState declarations
-const [testResult, setTestResult] = useState('');
-
-// Add this function with other functions
-const testBucketAccess = async () => {
-  setTestResult('Testing...');
-  try {
-    // Test 1: List buckets
-    const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
-    console.log('Buckets:', buckets, bucketsError);
-    
-    if (bucketsError) {
-      setTestResult(`❌ List buckets failed: ${bucketsError.message}`);
-      return;
-    }
-    
-    const selfiesBucket = buckets?.find(b => b.name === 'selfies');
-    if (!selfiesBucket) {
-      setTestResult(`❌ Selfies bucket not found. Available: ${buckets?.map(b => b.name).join(', ')}`);
-      return;
-    }
-    
-    // Test 2: List files in selfies bucket
-    const { data: files, error: filesError } = await supabase.storage
-      .from('selfies')
-      .list('', { limit: 1 });
-    
-    console.log('List files:', files, filesError);
-    
-    if (filesError) {
-      setTestResult(`❌ List files failed: ${filesError.message}`);
-      return;
-    }
-    
-    // Test 3: Try to upload a tiny test file
-    const testBlob = new Blob(['test'], { type: 'text/plain' });
-    const testFile = new File([testBlob], 'test.txt');
-    const testFileName = `test_${session.user.id}_${Date.now()}.txt`;
-    
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('selfies')
-      .upload(testFileName, testFile);
-    
-    console.log('Upload test:', uploadData, uploadError);
-    
-    if (uploadError) {
-      setTestResult(`❌ Upload failed: ${uploadError.message} (${JSON.stringify(uploadError)})`);
-      return;
-    }
-    
-    // Success! Clean up
-    await supabase.storage.from('selfies').remove([testFileName]);
-    setTestResult('✅ All tests passed! Bucket is accessible.');
-    
-  } catch (err: any) {
-    console.error('Test error:', err);
-    setTestResult(`❌ Test error: ${err.message}`);
-  }
-};
-
-// Add this button somewhere visible in your UI (e.g., near the admin button):
-<button 
-  onClick={testBucketAccess}
-  className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-full font-bold"
->
-  🧪 Test Bucket
-</button>
-
-{testResult && (
-  <div className="mt-4 p-4 bg-gray-100 rounded-lg">
-    <p className="font-mono text-sm">{testResult}</p>
-  </div>
-)}
-
-
-
-
-
-
-
-
-
-  
-  
   // ─── REALTIME SUBSCRIPTIONS ─────────────────────
   useEffect(() => {
     if (!session || showAdmin) return;
@@ -393,8 +299,12 @@ const testBucketAccess = async () => {
     setError("");
 
     try {
-      if (!navigator.geolocation) throw new Error("Geolocation not supported");
+      if (!navigator.geolocation) {
+        alert("Geolocation not supported by your browser");
+        throw new Error("Geolocation not supported");
+      }
 
+      console.log('Getting location...');
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           enableHighAccuracy: true,
@@ -403,12 +313,16 @@ const testBucketAccess = async () => {
         });
       });
 
+      console.log('Location obtained:', position.coords);
+
       const distance = calculateDistance(
         position.coords.latitude,
         position.coords.longitude,
         currentHunt.lat,
         currentHunt.lon
       );
+
+      console.log('Distance check:', { distance, required: currentHunt.radius });
 
       if (distance > currentHunt.radius) {
         alert(`You are ${Math.round(distance)}m away. Need to be within ${currentHunt.radius}m`);
@@ -419,11 +333,19 @@ const testBucketAccess = async () => {
       const fileExt = selfieFile.name.split(".").pop()?.toLowerCase() || "jpg";
       const fileName = `${session.user.id}_${currentHunt.id}_${Date.now()}.${fileExt}`;
 
-      const { error: uploadError } = await supabase.storage
+      console.log('Attempting upload:', { fileName, bucket: 'selfies', userId: session.user.id });
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
         .from("selfies")
         .upload(fileName, selfieFile);
 
-      if (uploadError) throw uploadError;
+      console.log('Upload result:', { uploadData, uploadError });
+
+      if (uploadError) {
+        console.error('Upload failed:', uploadError);
+        alert(`Upload failed: ${uploadError.message || JSON.stringify(uploadError)}`);
+        throw uploadError;
+      }
 
       const { data: { publicUrl } } = supabase.storage
         .from("selfies")
@@ -471,7 +393,9 @@ const testBucketAccess = async () => {
       setCurrentHunt(null);
       alert(`Success! Your code is: ${currentHunt.code}`);
     } catch (err: any) {
-      alert(err.message || "Upload failed");
+      console.error('Full error:', err);
+      const errorMessage = err.message || err.error || JSON.stringify(err);
+      alert(`Upload failed: ${errorMessage}`);
     } finally {
       setUploading(false);
     }
