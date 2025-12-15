@@ -158,12 +158,11 @@ export default function App() {
 
 
 
-  
 
 
 
 
-// Add this state at the top with other useState declarations
+  // Add this state at the top with other useState declarations
 const [testResult, setTestResult] = useState('');
 
 // Add this function with other functions
@@ -241,8 +240,11 @@ const testBucketAccess = async () => {
 
 
 
-  
 
+
+
+
+  
   
   // ─── REALTIME SUBSCRIPTIONS ─────────────────────
   useEffect(() => {
