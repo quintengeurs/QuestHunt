@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -99,6 +98,8 @@ export default function App() {
   const [adminHunts, setAdminHunts] = useState<any[]>([]);
   const [selfies, setSelfies] = useState<any[]>([]);
   const [processingSubmission, setProcessingSubmission] = useState<string | null>(null);
+  const [editingHunt, setEditingHunt] = useState<any>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   // Create Hunt Form
   const [newHuntDate, setNewHuntDate] = useState("");
@@ -192,6 +193,8 @@ export default function App() {
   }, [session, showAdmin]);
 
   const loadProgressAndHunts = useCallback(async () => {
+    if (!session) return; // FIX 1: Guard against missing session
+    
     try {
       setError("");
 
@@ -257,7 +260,7 @@ export default function App() {
       setError("Failed to load hunts. Please refresh.");
       setDataLoaded(true);
     }
-  }, [session, activeFilter]);
+  }, [session, activeFilter, applyFilter]); // FIX 2: Add applyFilter to dependencies
 
   const fetchHunts = useCallback(async () => {
     const todayISO = new Date().toISOString().split("T")[0];
@@ -282,9 +285,9 @@ export default function App() {
     if (dataLoaded && hunts.length > 0) applyFilter(hunts, completed, activeFilter);
   }, [hunts, completed, activeFilter, dataLoaded, applyFilter]);
 
-  // ─── SELFIE UPLOAD – FIXED BUCKET NAME ─────────────────────
+  // ─── SELFIE UPLOAD ─────────────────────
   const uploadSelfie = useCallback(async () => {
-    if (!selfieFile || !currentHunt || uploading) return;
+    if (!selfieFile || !currentHunt || uploading || !session) return; // FIX 3: Add session guard
     if (completed.includes(currentHunt.id)) {
       alert("You have already completed this hunt!");
       setShowModal(false);
@@ -323,13 +326,13 @@ export default function App() {
       const fileName = `${session.user.id}_${currentHunt.id}_${Date.now()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
-        .from("selfies")  // FIXED: bucket name
+        .from("selfies")
         .upload(fileName, selfieFile);
 
       if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage
-        .from("selfies")  // FIXED: bucket name
+        .from("selfies")
         .getPublicUrl(fileName);
 
       const { error: insertError } = await supabase.from("selfies").insert({
@@ -446,7 +449,7 @@ export default function App() {
     }
   }, []);
 
-  // ─── CREATE HUNT – FIXED IMAGE UPLOAD ─────────────────────
+  // ─── CREATE HUNT ─────────────────────
   const createHunt = useCallback(async () => {
     if (!newHuntBusinessName.trim() || !newHuntRiddle.trim() || !newHuntCode.trim() || !newHuntLat || !newHuntLon) {
       alert("Please fill all required fields");
@@ -542,6 +545,107 @@ export default function App() {
       alert("Failed to reject");
     } finally {
       setProcessingSubmission(null);
+    }
+  }, [loadAdminData]);
+
+  // ─── EDIT HUNT ─────────────────────
+  const startEditHunt = useCallback((hunt: any) => {
+    setEditingHunt(hunt);
+    setNewHuntDate(hunt.date || "");
+    setNewHuntCategory(hunt.category || "");
+    setNewHuntRiddle(hunt.riddle || "");
+    setNewHuntBusinessName(hunt.business_name || "");
+    setNewHuntCode(hunt.code || "");
+    setNewHuntDiscount(hunt.discount || "");
+    setNewHuntLat(hunt.lat?.toString() || "");
+    setNewHuntLon(hunt.lon?.toString() || "");
+    setNewHuntRadius(hunt.radius?.toString() || "50");
+    setNewHuntPhoto(null);
+    setShowEditModal(true);
+  }, []);
+
+  const updateHunt = useCallback(async () => {
+    if (!editingHunt) return;
+    if (!newHuntBusinessName.trim() || !newHuntRiddle.trim() || !newHuntCode.trim() || !newHuntLat || !newHuntLon) {
+      alert("Please fill all required fields");
+      return;
+    }
+
+    const lat = parseFloat(newHuntLat);
+    const lon = parseFloat(newHuntLon);
+    if (isNaN(lat) || isNaN(lon)) {
+      alert("Invalid coordinates");
+      return;
+    }
+
+    setCreatingHunt(true);
+    try {
+      let photoUrl = editingHunt.photo;
+
+      if (newHuntPhoto) {
+        const fileExt = newHuntPhoto.name.split(".").pop()?.toLowerCase() || "jpg";
+        const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("hunts")
+          .upload(fileName, newHuntPhoto, { cacheControl: "3600", upsert: false });
+
+        if (uploadError) throw uploadError;
+
+        const { data } = supabase.storage.from("hunts").getPublicUrl(fileName);
+        photoUrl = data.publicUrl;
+      }
+
+      const { error } = await supabase.from("hunts").update({
+        date: newHuntDate || getTodayLocalDate(),
+        category: newHuntCategory || "Food & Drink",
+        riddle: newHuntRiddle.trim(),
+        business_name: newHuntBusinessName.trim(),
+        code: newHuntCode.trim(),
+        discount: newHuntDiscount.trim(),
+        photo: photoUrl,
+        lat,
+        lon,
+        radius: parseInt(newHuntRadius) || 50,
+      }).eq("id", editingHunt.id);
+
+      if (error) throw error;
+
+      alert("Hunt updated successfully!");
+      setShowEditModal(false);
+      setEditingHunt(null);
+      setNewHuntDate("");
+      setNewHuntCategory("");
+      setNewHuntRiddle("");
+      setNewHuntBusinessName("");
+      setNewHuntCode("");
+      setNewHuntDiscount("");
+      setNewHuntLat("");
+      setNewHuntLon("");
+      setNewHuntRadius("50");
+      setNewHuntPhoto(null);
+      loadAdminData();
+    } catch (err: any) {
+      alert("Failed to update hunt: " + (err.message || "Unknown error"));
+    } finally {
+      setCreatingHunt(false);
+    }
+  }, [
+    editingHunt, newHuntDate, newHuntCategory, newHuntRiddle, newHuntBusinessName,
+    newHuntCode, newHuntDiscount, newHuntLat, newHuntLon, newHuntRadius,
+    newHuntPhoto, loadAdminData
+  ]);
+
+  const deleteHunt = useCallback(async (id: string) => {
+    if (!window.confirm("Are you sure you want to delete this hunt? This cannot be undone.")) return;
+    
+    try {
+      const { error } = await supabase.from("hunts").delete().eq("id", id);
+      if (error) throw error;
+      alert("Hunt deleted successfully!");
+      loadAdminData();
+    } catch (err: any) {
+      alert("Failed to delete hunt: " + (err.message || "Unknown error"));
     }
   }, [loadAdminData]);
 
@@ -649,7 +753,21 @@ export default function App() {
                     <p className="text-gray-600 italic mb-4">"{hunt.riddle}"</p>
                     <p className="text-sm"><strong>Code:</strong> {hunt.code}</p>
                     <p className="text-sm"><strong>Date:</strong> {new Date(hunt.date).toLocaleDateString()}</p>
-                    <p className="text-sm"><strong>Radius:</strong> {hunt.radius}m</p>
+                    <p className="text-sm mb-4"><strong>Radius:</strong> {hunt.radius}m</p>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => startEditHunt(hunt)}
+                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold transition"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => deleteHunt(hunt.id)}
+                        className="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl font-bold transition"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -768,11 +886,107 @@ export default function App() {
             </div>
           )}
         </div>
+
+        {/* EDIT HUNT MODAL */}
+        {showEditModal && editingHunt && (
+          <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-6 overflow-y-auto">
+            <div className="bg-white rounded-3xl shadow-2xl p-10 max-w-4xl w-full my-8">
+              <div className="flex justify-between items-center mb-8">
+                <h2 className="text-4xl font-black text-amber-900">Edit Hunt</h2>
+                <button
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setEditingHunt(null);
+                    setNewHuntPhoto(null);
+                  }}
+                  className="text-4xl text-gray-500 hover:text-gray-700"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="grid md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Active From Date</label>
+                  <input type="date" value={newHuntDate} onChange={(e) => setNewHuntDate(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Category</label>
+                  <select value={newHuntCategory} onChange={(e) => setNewHuntCategory(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl">
+                    <option value="">Select category</option>
+                    <option>Café</option>
+                    <option>Barber</option>
+                    <option>Restaurant</option>
+                    <option>Gig</option>
+                    <option>Museum</option>
+                    <option>Food & Drink</option>
+                  </select>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Business Name *</label>
+                  <input type="text" value={newHuntBusinessName} onChange={(e) => setNewHuntBusinessName(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. Brew Coffee House" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Riddle / Clue *</label>
+                  <textarea value={newHuntRiddle} onChange={(e) => setNewHuntRiddle(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl h-32" placeholder="Write an intriguing riddle..." />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Secret Code *</label>
+                  <input type="text" value={newHuntCode} onChange={(e) => setNewHuntCode(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. BREW2025" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Discount / Reward</label>
+                  <input type="text" value={newHuntDiscount} onChange={(e) => setNewHuntDiscount(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. Free coffee" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Latitude *</label>
+                  <input type="text" value={newHuntLat} onChange={(e) => setNewHuntLat(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. 51.5074" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Longitude *</label>
+                  <input type="text" value={newHuntLon} onChange={(e) => setNewHuntLon(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. -0.1278" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Radius (meters)</label>
+                  <input type="number" value={newHuntRadius} onChange={(e) => setNewHuntRadius(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="50" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Hunt Photo (leave empty to keep current)</label>
+                  {editingHunt.photo && !newHuntPhoto && (
+                    <div className="mb-4">
+                      <img src={getSafePhotoUrl(editingHunt.photo)} alt="Current" className="w-full h-48 object-cover rounded-xl" />
+                      <p className="text-sm text-gray-600 mt-2">Current photo (will be kept if you don't upload a new one)</p>
+                    </div>
+                  )}
+                  <input type="file" accept="image/*" onChange={(e) => setNewHuntPhoto(e.target.files?.[0] || null)} className="w-full p-5 border-2 border-dashed border-amber-300 rounded-2xl bg-amber-50" />
+                </div>
+              </div>
+              <div className="flex gap-4 mt-10">
+                <button
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setEditingHunt(null);
+                    setNewHuntPhoto(null);
+                  }}
+                  className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 py-6 rounded-2xl font-black text-2xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={updateHunt}
+                  disabled={creatingHunt}
+                  className="flex-1 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white py-6 rounded-2xl font-black text-2xl transition"
+                >
+                  {creatingHunt ? "Updating..." : "Update Hunt"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
-  // ─── LOGIN SCREEN, MAIN APP, MODALS (unchanged) ─────────────────────
+  // ─── LOGIN SCREEN ─────────────────────
   if (!session) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50 flex items-center justify-center px-6">
@@ -848,7 +1062,6 @@ export default function App() {
         </div>
       )}
 
-
       {/* STATS */}
       <div className="max-w-md mx-auto p-6">
         <div className="bg-white rounded-3xl shadow-2xl p-8 text-center">
@@ -923,7 +1136,7 @@ export default function App() {
                   <p className="text-2xl font-bold mb-4 text-gray-800">{hunt.riddle}</p>
                   <p className="text-xl font-medium text-gray-700 mb-2">{hunt.business_name}</p>
                   {hunt.discount && (
-                    <p className="text-lg text-green-600 font-semibold mb-8">Gift {hunt.discount}</p>
+                    <p className="text-lg text-green-600 font-semibold mb-8">Gift: {hunt.discount}</p>
                   )}
                   <button
                     onClick={() => {
