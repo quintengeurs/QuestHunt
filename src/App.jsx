@@ -30,11 +30,11 @@ const getSafePhotoUrl = (url) => {
 };
 
 function calculateDistance(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-): number {
+  lat1,
+  lon1,
+  lat2,
+  lon2
+) {
   const R = 6371000;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
@@ -48,7 +48,7 @@ function calculateDistance(
   return R * c;
 }
 
-function getTodayLocalDate(): string {
+function getTodayLocalDate() {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, "0");
@@ -56,7 +56,7 @@ function getTodayLocalDate(): string {
   return `${year}-${month}-${day}`;
 }
 
-function getYesterdayLocalDate(): string {
+function getYesterdayLocalDate() {
   const now = new Date();
   now.setDate(now.getDate() - 1);
   const year = now.getFullYear();
@@ -66,39 +66,39 @@ function getYesterdayLocalDate(): string {
 }
 
 export default function App() {
-  const [session, setSession] = useState<any>(null);
+  const [session, setSession] = useState(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const [hunts, setHunts] = useState<any[]>([]);
-  const [filteredHunts, setFilteredHunts] = useState<any[]>([]);
+  const [hunts, setHunts] = useState([]);
+  const [filteredHunts, setFilteredHunts] = useState([]);
   const [activeFilter, setActiveFilter] = useState("All");
-  const [completed, setCompleted] = useState<string[]>([]);
+  const [completed, setCompleted] = useState([]);
   const [streak, setStreak] = useState(0);
   const [totalHunts, setTotalHunts] = useState(0);
   const [tier, setTier] = useState("Newbie");
-  const [lastActive, setLastActive] = useState<string | null>(null);
-  const [currentHunt, setCurrentHunt] = useState<any>(null);
+  const [lastActive, setLastActive] = useState(null);
+  const [currentHunt, setCurrentHunt] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showCompletedModal, setShowCompletedModal] = useState(false);
-  const [selfieFile, setSelfieFile] = useState<File | null>(null);
+  const [selfieFile, setSelfieFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [error, setError] = useState("");
-  const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
+  const [leaderboardData, setLeaderboardData] = useState([]);
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
 
   // Admin
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [adminTab, setAdminTab] = useState("hunts");
-  const [adminHunts, setAdminHunts] = useState<any[]>([]);
-  const [selfies, setSelfies] = useState<any[]>([]);
-  const [processingSubmission, setProcessingSubmission] = useState<string | null>(null);
-  const [editingHunt, setEditingHunt] = useState<any>(null);
+  const [adminHunts, setAdminHunts] = useState([]);
+  const [selfies, setSelfies] = useState([]);
+  const [processingSubmission, setProcessingSubmission] = useState(null);
+  const [editingHunt, setEditingHunt] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
 
   // Create Hunt Form
@@ -111,7 +111,7 @@ export default function App() {
   const [newHuntLat, setNewHuntLat] = useState("");
   const [newHuntLon, setNewHuntLon] = useState("");
   const [newHuntRadius, setNewHuntRadius] = useState("50");
-  const [newHuntPhoto, setNewHuntPhoto] = useState<File | null>(null);
+  const [newHuntPhoto, setNewHuntPhoto] = useState(null);
   const [creatingHunt, setCreatingHunt] = useState(false);
 
   // ─── AUTH & PROFILE AUTO-CREATE ─────────────────────
@@ -182,18 +182,17 @@ export default function App() {
   }, [session, showAdmin]);
 
   // ─── LOAD DATA ─────────────────────
-  useEffect(() => {
-    if (!session) return;
-    if (showAdmin) {
-      loadAdminData();
-    } else {
-      setDataLoaded(false);
-      loadProgressAndHunts();
-    }
-  }, [session, showAdmin]);
+  const applyFilter = useCallback(
+    (allHunts, completedIds, filterCategory) => {
+      let filtered = allHunts.filter((h) => !completedIds.includes(h.id));
+      if (filterCategory !== "All") filtered = filtered.filter((h) => h.category === filterCategory);
+      setFilteredHunts(filtered);
+    },
+    []
+  );
 
   const loadProgressAndHunts = useCallback(async () => {
-    if (!session) return; // FIX 1: Guard against missing session
+    if (!session) return;
     
     try {
       setError("");
@@ -215,8 +214,8 @@ export default function App() {
         if (progressRows.length > 1) {
           const all = new Set<string>();
           let maxTotal = 0, maxStreak = 0;
-          progressRows.forEach((r: any) => {
-            if (Array.isArray(r.completed_hunt_ids)) r.completed_hunt_ids.forEach((id: string) => all.add(id));
+          progressRows.forEach((r) => {
+            if (Array.isArray(r.completed_hunt_ids)) r.completed_hunt_ids.forEach((id) => all.add(id));
             maxTotal = Math.max(maxTotal, r.total_hunts || 0);
             maxStreak = Math.max(maxStreak, r.streak || 0);
           });
@@ -255,12 +254,22 @@ export default function App() {
       setHunts(huntsData || []);
       applyFilter(huntsData || [], completedIds, activeFilter);
       setDataLoaded(true);
-    } catch (e: any) {
+    } catch (e) {
       console.error("Load error:", e);
       setError("Failed to load hunts. Please refresh.");
       setDataLoaded(true);
     }
-  }, [session, activeFilter, applyFilter]); // FIX 2: Add applyFilter to dependencies
+  }, [session, activeFilter, applyFilter]);
+
+  useEffect(() => {
+    if (!session) return;
+    if (showAdmin) {
+      loadAdminData();
+    } else {
+      setDataLoaded(false);
+      loadProgressAndHunts();
+    }
+  }, [session, showAdmin, loadProgressAndHunts]);
 
   const fetchHunts = useCallback(async () => {
     const todayISO = new Date().toISOString().split("T")[0];
@@ -272,22 +281,13 @@ export default function App() {
     if (data) setHunts(data);
   }, []);
 
-  const applyFilter = useCallback(
-    (allHunts: any[], completedIds: string[], filterCategory: string) => {
-      let filtered = allHunts.filter((h) => !completedIds.includes(h.id));
-      if (filterCategory !== "All") filtered = filtered.filter((h) => h.category === filterCategory);
-      setFilteredHunts(filtered);
-    },
-    []
-  );
-
   useEffect(() => {
     if (dataLoaded && hunts.length > 0) applyFilter(hunts, completed, activeFilter);
   }, [hunts, completed, activeFilter, dataLoaded, applyFilter]);
 
   // ─── SELFIE UPLOAD ─────────────────────
   const uploadSelfie = useCallback(async () => {
-    if (!selfieFile || !currentHunt || uploading || !session) return; // FIX 3: Add session guard
+    if (!selfieFile || !currentHunt || uploading || !session) return;
     if (completed.includes(currentHunt.id)) {
       alert("You have already completed this hunt!");
       setShowModal(false);
@@ -299,21 +299,15 @@ export default function App() {
     setError("");
 
     try {
-      if (!navigator.geolocation) {
-        alert("Geolocation not supported by your browser");
-        throw new Error("Geolocation not supported");
-      }
+      if (!navigator.geolocation) throw new Error("Geolocation not supported");
 
-      console.log('Getting location...');
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+      const position = await new Promise((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           enableHighAccuracy: true,
           timeout: 10000,
           maximumAge: 0,
         });
       });
-
-      console.log('Location obtained:', position.coords);
 
       const distance = calculateDistance(
         position.coords.latitude,
@@ -322,34 +316,47 @@ export default function App() {
         currentHunt.lon
       );
 
-      console.log('Distance check:', { distance, required: currentHunt.radius });
-
       if (distance > currentHunt.radius) {
         alert(`You are ${Math.round(distance)}m away. Need to be within ${currentHunt.radius}m`);
         setUploading(false);
         return;
       }
 
+      // Enhanced file validation
+      const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+      if (!allowedTypes.includes(selfieFile.type)) {
+        throw new Error('Invalid file type. Please upload a JPG, PNG, or WebP image.');
+      }
+
+      // Check file size (max 5MB)
+      if (selfieFile.size > 5 * 1024 * 1024) {
+        throw new Error('File too large. Maximum size is 5MB.');
+      }
+
       const fileExt = selfieFile.name.split(".").pop()?.toLowerCase() || "jpg";
-      const fileName = `${session.user.id}_${currentHunt.id}_${Date.now()}.${fileExt}`;
+      const fileName = `${session.user.id}/${currentHunt.id}_${Date.now()}.${fileExt}`;
 
-      console.log('Attempting upload:', { fileName, bucket: 'selfies', userId: session.user.id });
+      console.log("Uploading selfie to:", fileName);
 
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      const { error: uploadError, data: uploadData } = await supabase.storage
         .from("selfies")
-        .upload(fileName, selfieFile);
-
-      console.log('Upload result:', { uploadData, uploadError });
+        .upload(fileName, selfieFile, {
+          cacheControl: '3600',
+          upsert: false
+        });
 
       if (uploadError) {
-        console.error('Upload failed:', uploadError);
-        alert(`Upload failed: ${uploadError.message || JSON.stringify(uploadError)}`);
-        throw uploadError;
+        console.error("Upload error:", uploadError);
+        throw new Error(`Upload failed: ${uploadError.message}`);
       }
+
+      console.log("Upload successful:", uploadData);
 
       const { data: { publicUrl } } = supabase.storage
         .from("selfies")
         .getPublicUrl(fileName);
+
+      console.log("Public URL:", publicUrl);
 
       const { error: insertError } = await supabase.from("selfies").insert({
         user_id: session.user.id,
@@ -358,8 +365,9 @@ export default function App() {
       });
 
       if (insertError) {
+        console.error("Insert error:", insertError);
         await supabase.storage.from("selfies").remove([fileName]);
-        throw insertError;
+        throw new Error(`Database insert failed: ${insertError.message}`);
       }
 
       const newCompleted = [...new Set([...completed, currentHunt.id])];
@@ -392,10 +400,9 @@ export default function App() {
       setSelfieFile(null);
       setCurrentHunt(null);
       alert(`Success! Your code is: ${currentHunt.code}`);
-    } catch (err: any) {
-      console.error('Full error:', err);
-      const errorMessage = err.message || err.error || JSON.stringify(err);
-      alert(`Upload failed: ${errorMessage}`);
+    } catch (err) {
+      console.error("Selfie upload error:", err);
+      alert(err.message || "Upload failed");
     } finally {
       setUploading(false);
     }
@@ -413,21 +420,15 @@ export default function App() {
 
       if (error) throw error;
 
-      const userIds = data.map((item: any) => item.user_id);
-      
-      // Get profiles directly instead of using admin API
-      const { data: profiles, error: profilesError } = await supabase
+      const userIds = data.map((item) => item.user_id);
+      const { data: profiles } = await supabase
         .from("profiles")
         .select("id, username, full_name")
         .in("id", userIds);
 
-      if (profilesError) {
-        console.error('Profiles error:', profilesError);
-      }
+      const profileMap = Object.fromEntries((profiles || []).map((p) => [p.id, p]));
 
-      const profileMap = Object.fromEntries((profiles || []).map((p: any) => [p.id, p]));
-
-      const enriched = data.map((item: any, idx: number) => {
+      const enriched = data.map((item, idx) => {
         const profile = profileMap[item.user_id];
         const displayName = profile?.username || profile?.full_name || `Hunter #${idx + 1}`;
         return { displayName, hunts: item.total_hunts, tier: item.tier || "Newbie" };
@@ -458,7 +459,7 @@ export default function App() {
       const { data: subs } = await supabase.from("selfies").select("*").order("created_at", { ascending: false });
 
       const enriched = await Promise.all(
-        (subs || []).map(async (sub: any) => {
+        (subs || []).map(async (sub) => {
           const { data: hunt } = await supabase
             .from("hunts")
             .select("business_name")
@@ -533,7 +534,7 @@ export default function App() {
       setNewHuntPhoto(null);
       loadAdminData();
       setAdminTab("hunts");
-    } catch (err: any) {
+    } catch (err) {
       alert("Failed to create hunt: " + (err.message || "Unknown error"));
     } finally {
       setCreatingHunt(false);
@@ -550,11 +551,9 @@ export default function App() {
     try {
       const { error } = await supabase.from("selfies").update({ approved: true }).eq("id", id);
       if (error) throw error;
-      alert("Selfie approved successfully!");
       await loadAdminData();
-    } catch (err: any) {
-      alert("Failed to approve: " + (err.message || "Unknown error"));
-      console.error("Approve error:", err);
+    } catch {
+      alert("Failed to approve");
     } finally {
       setProcessingSubmission(null);
     }
@@ -575,7 +574,7 @@ export default function App() {
   }, [loadAdminData]);
 
   // ─── EDIT HUNT ─────────────────────
-  const startEditHunt = useCallback((hunt: any) => {
+  const startEditHunt = useCallback((hunt) => {
     setEditingHunt(hunt);
     setNewHuntDate(hunt.date || "");
     setNewHuntCategory(hunt.category || "");
@@ -651,7 +650,7 @@ export default function App() {
       setNewHuntRadius("50");
       setNewHuntPhoto(null);
       loadAdminData();
-    } catch (err: any) {
+    } catch (err) {
       alert("Failed to update hunt: " + (err.message || "Unknown error"));
     } finally {
       setCreatingHunt(false);
@@ -670,7 +669,7 @@ export default function App() {
       if (error) throw error;
       alert("Hunt deleted successfully!");
       loadAdminData();
-    } catch (err: any) {
+    } catch (err) {
       alert("Failed to delete hunt: " + (err.message || "Unknown error"));
     }
   }, [loadAdminData]);
@@ -691,7 +690,7 @@ export default function App() {
       });
       if (error) throw error;
       alert("Check your email to confirm!");
-    } catch (error: any) {
+    } catch (error) {
       setAuthError(error.message);
     } finally {
       setLoading(false);
@@ -711,7 +710,7 @@ export default function App() {
         password,
       });
       if (error) throw error;
-    } catch (error: any) {
+    } catch (error) {
       setAuthError(error.message);
     } finally {
       setLoading(false);
