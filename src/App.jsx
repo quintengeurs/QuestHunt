@@ -205,19 +205,30 @@ export default function App() {
         setLastActive(null);
       }
 
-      const todayISO = new Date().toISOString().split("T")[0];
+      // Load all hunts (no date restriction on server)
       const { data: huntsData, error: huntsError } = await supabase
         .from("hunts")
         .select("*")
-        .gte("date", todayISO)
         .order("date", { ascending: false });
 
       if (huntsError) throw huntsError;
 
-      setHunts(huntsData || []);
-      
-      // Apply filter
-      let filtered = (huntsData || []).filter((h) => !completedIds.includes(h.id));
+      const today = new Date();
+
+      // Client-side filter: active if started on/before today AND still within validity period
+      const activeHunts = (huntsData || []).filter((hunt) => {
+        const huntDate = new Date(hunt.date);
+        const validity = hunt.validity_days || 7; // default 7 days
+        const expiryDate = new Date(huntDate);
+        expiryDate.setDate(huntDate.getDate() + validity);
+
+        return huntDate <= today && today <= expiryDate;
+      });
+
+      setHunts(activeHunts);
+
+      // Apply category filter + remove completed
+      let filtered = activeHunts.filter((h) => !completedIds.includes(h.id));
       if (filterToApply !== "All") filtered = filtered.filter((h) => h.category === filterToApply);
       setFilteredHunts(filtered);
       
@@ -233,15 +244,25 @@ export default function App() {
 
   const fetchHunts = useCallback(async () => {
     try {
-      const todayISO = new Date().toISOString().split("T")[0];
       const { data, error } = await supabase
         .from("hunts")
         .select("*")
-        .gte("date", todayISO)
         .order("date", { ascending: false });
       
       if (error) throw error;
-      if (data) setHunts(data);
+
+      const today = new Date();
+
+      const activeHunts = (data || []).filter((hunt) => {
+        const huntDate = new Date(hunt.date);
+        const validity = hunt.validity_days || 7;
+        const expiryDate = new Date(huntDate);
+        expiryDate.setDate(huntDate.getDate() + validity);
+
+        return huntDate <= today && today <= expiryDate;
+      });
+
+      setHunts(activeHunts);
     } catch (e) {
       console.error("Fetch hunts error:", e);
       setError("Failed to fetch hunts");
@@ -287,15 +308,14 @@ export default function App() {
   useEffect(() => {
     if (!session) return;
     
-    // Only load on initial mount or when session/showAdmin changes
     if (showAdmin) {
       loadAdminData();
     } else {
       loadProgressAndHunts(activeFilter);
     }
-  }, [session, showAdmin]); // Intentionally excluding activeFilter and loadProgressAndHunts
+  }, [session, showAdmin]);
 
-  // ─── REALTIME SUBSCRIPTIONS (using refs to avoid recreating) ─────────────────────
+  // ─── REALTIME SUBSCRIPTIONS ─────────────────────
   useEffect(() => {
     if (!session || showAdmin) return;
 
@@ -317,7 +337,6 @@ export default function App() {
           filter: `user_id=eq.${session.user.id}`,
         },
         () => {
-          // Only reload if not currently loading
           if (!loadingDataRef.current) {
             loadProgressAndHunts(activeFilter);
           }
@@ -329,9 +348,9 @@ export default function App() {
       supabase.removeChannel(huntsChannel);
       supabase.removeChannel(progressChannel);
     };
-  }, [session, showAdmin]); // activeFilter intentionally not here
+  }, [session, showAdmin]);
 
-  // Apply filters whenever they change (separate from data loading)
+  // Apply filters whenever they change
   useEffect(() => {
     if (dataLoaded && hunts.length > 0) {
       let filtered = hunts.filter((h) => !completed.includes(h.id));
@@ -377,20 +396,17 @@ export default function App() {
         return;
       }
 
-      // Enhanced file validation
       const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
       if (!allowedTypes.includes(selfieFile.type)) {
         throw new Error('Invalid file type. Please upload a JPG, PNG, or WebP image.');
       }
 
-      // Check file size (max 5MB)
       if (selfieFile.size > 5 * 1024 * 1024) {
         throw new Error('File too large. Maximum size is 5MB.');
       }
 
       const fileExt = selfieFile.name.split(".").pop()?.toLowerCase() || "jpg";
       const fileName = `uploads/${session.user.id}/${currentHunt.id}_${Date.now()}.${fileExt}`;
-      console.log("Uploading selfie to:", fileName);
 
       const { error: uploadError, data: uploadData } = await supabase.storage
         .from("user-uploads")
@@ -404,13 +420,9 @@ export default function App() {
         throw new Error(`Upload failed: ${uploadError.message}`);
       }
 
-      console.log("Upload successful:", uploadData);
-
       const { data: { publicUrl } } = supabase.storage
         .from("user-uploads")
         .getPublicUrl(fileName);
-
-      console.log("Public URL:", publicUrl);
 
       const { error: insertError } = await supabase.from("user-uploads").insert({
         user_id: session.user.id,
@@ -498,7 +510,6 @@ export default function App() {
     }
   }, []);
 
-  // Reload leaderboard whenever modal opens
   useEffect(() => {
     if (showLeaderboard) {
       loadLeaderboard();
@@ -548,6 +559,7 @@ export default function App() {
         lat,
         lon,
         radius: parseInt(newHuntRadius) || 50,
+        validity_days: 7,
       });
 
       if (error) throw error;
