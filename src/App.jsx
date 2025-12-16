@@ -334,8 +334,7 @@ export default function App() {
       }
 
       const fileExt = selfieFile.name.split(".").pop()?.toLowerCase() || "jpg";
-      const fileName = `${session.user.id}/${currentHunt.id}_${Date.now()}.${fileExt}`;
-
+      const fileName = `uploads/${session.user.id}/${currentHunt.id}_${Date.now()}.${fileExt}`;
       console.log("Uploading selfie to:", fileName);
 
       const { error: uploadError, data: uploadData } = await supabase.storage
