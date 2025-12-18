@@ -124,49 +124,61 @@ export default function App() {
         // Set timeout to prevent infinite initialization
         timeoutId = setTimeout(() => {
           if (mounted && initializing) {
-            console.warn("Auth initialization timeout - proceeding anyway");
+            console.warn("Auth initialization timeout - proceeding without session");
+            setSession(null);
             setInitializing(false);
           }
-        }, 5000); // 5 second timeout
+        }, 3000); // Reduced to 3 second timeout
 
         const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession();
+        
+        // Clear timeout if we got a response
+        clearTimeout(timeoutId);
         
         if (sessionError) {
           console.error("Session error:", sessionError);
         }
         
-        if (mounted) {
-          setSession(currentSession);
-          if (currentSession?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-            setIsAdmin(true);
-          }
-          setInitializing(false);
-          clearTimeout(timeoutId);
+        if (!mounted) return;
+        
+        setSession(currentSession);
+        if (currentSession?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+          setIsAdmin(true);
         }
+        setInitializing(false);
 
         // Create profile if needed
-        if (currentSession && mounted) {
-          const { data: profile, error: profileError } = await supabase
-            .from("profiles")
-            .select("id")
-            .eq("id", currentSession.user.id)
-            .single();
+        if (currentSession) {
+          try {
+            const { data: profile, error: profileError } = await supabase
+              .from("profiles")
+              .select("id")
+              .eq("id", currentSession.user.id)
+              .maybeSingle();
 
-          if (profileError && profileError.code !== 'PGRST116') {
-            console.error("Profile check error:", profileError);
-          }
+            if (profileError) {
+              console.error("Profile check error:", profileError);
+            }
 
-          if (!profile && mounted) {
-            await supabase.from("profiles").insert({
-              id: currentSession.user.id,
-              username: currentSession.user.email?.split("@")[0] || `hunter_${Date.now().toString(36)}`,
-              full_name: currentSession.user.user_metadata.full_name || null,
-            });
+            if (!profile && mounted) {
+              const { error: insertError } = await supabase.from("profiles").insert({
+                id: currentSession.user.id,
+                username: currentSession.user.email?.split("@")[0] || `hunter_${Date.now().toString(36)}`,
+                full_name: currentSession.user.user_metadata.full_name || null,
+              });
+              
+              if (insertError) {
+                console.error("Profile creation error:", insertError);
+              }
+            }
+          } catch (profileErr) {
+            console.error("Profile operation failed:", profileErr);
           }
         }
       } catch (err) {
         console.error("Auth initialization error:", err);
         if (mounted) {
+          setSession(null);
           setInitializing(false);
           clearTimeout(timeoutId);
         }
@@ -220,10 +232,23 @@ export default function App() {
 
   // ─── LOAD DATA FUNCTIONS ─────────────────────
   const loadProgressAndHunts = useCallback(async () => {
-    if (!session || loadingDataRef.current || showAdmin) {
+    // Strict guards to prevent loading loops
+    if (!session) {
+      console.log("loadProgressAndHunts: No session, skipping");
       return;
     }
     
+    if (loadingDataRef.current) {
+      console.log("loadProgressAndHunts: Already loading, skipping");
+      return;
+    }
+    
+    if (showAdmin) {
+      console.log("loadProgressAndHunts: In admin mode, skipping");
+      return;
+    }
+    
+    console.log("loadProgressAndHunts: Starting data load");
     loadingDataRef.current = true;
     
     try {
@@ -303,12 +328,14 @@ export default function App() {
 
       setHunts(activeHunts);
       setDataLoaded(true);
+      console.log("loadProgressAndHunts: Complete - loaded", activeHunts.length, "hunts");
     } catch (e) {
       console.error("Load error:", e);
       setError("Failed to load hunts. Please refresh.");
       setDataLoaded(true);
     } finally {
       loadingDataRef.current = false;
+      console.log("loadProgressAndHunts: Loading flag reset");
     }
   }, [session, showAdmin]);
 
@@ -351,14 +378,21 @@ export default function App() {
 
   // ─── INITIAL LOAD ─────────────────────
   useEffect(() => {
-    if (!session || initializing) return;
+    console.log("Initial load effect:", { session: !!session, initializing, showAdmin, isAdmin });
+    
+    if (!session || initializing) {
+      console.log("Initial load: Skipping - no session or still initializing");
+      return;
+    }
     
     if (showAdmin && isAdmin) {
+      console.log("Initial load: Loading admin data");
       loadAdminData();
     } else if (!showAdmin) {
+      console.log("Initial load: Loading progress and hunts");
       loadProgressAndHunts();
     }
-  }, [session, showAdmin, isAdmin, initializing]);
+  }, [session, showAdmin, isAdmin, initializing, loadAdminData, loadProgressAndHunts]);
 
   // ─── FILTER APPLICATION ─────────────────────
   useEffect(() => {
