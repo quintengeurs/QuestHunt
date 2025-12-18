@@ -66,6 +66,7 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [initializing, setInitializing] = useState(true);
 
   const [hunts, setHunts] = useState([]);
   const [filteredHunts, setFilteredHunts] = useState([]);
@@ -109,57 +110,106 @@ export default function App() {
   const [newHuntPhoto, setNewHuntPhoto] = useState(null);
   const [creatingHunt, setCreatingHunt] = useState(false);
 
-  // Ref to prevent race conditions
+  // Refs to prevent race conditions
   const loadingDataRef = useRef(false);
-  const isInitialMount = useRef(true);
+  const isUnmounted = useRef(false);
 
   // ─── AUTH & PROFILE AUTO-CREATE ─────────────────────
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      if (data.session?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-        setIsAdmin(true);
-      }
-    });
+    let mounted = true;
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setSession(session);
-      if (session?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+    const initAuth = async () => {
+      try {
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        
+        if (mounted) {
+          setSession(currentSession);
+          if (currentSession?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+            setIsAdmin(true);
+          }
+          setInitializing(false);
+        }
+
+        // Create profile if needed
+        if (currentSession) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("id", currentSession.user.id)
+            .single();
+
+          if (!profile && mounted) {
+            await supabase.from("profiles").insert({
+              id: currentSession.user.id,
+              username: currentSession.user.email?.split("@")[0] || `hunter_${Date.now().toString(36)}`,
+              full_name: currentSession.user.user_metadata.full_name || null,
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Auth initialization error:", err);
+        if (mounted) {
+          setInitializing(false);
+        }
+      }
+    };
+
+    initAuth();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+      if (!mounted) return;
+
+      setSession(newSession);
+      if (newSession?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
         setIsAdmin(true);
       } else {
         setIsAdmin(false);
         setShowAdmin(false);
       }
 
-      if (session) {
+      if (newSession) {
         const { data: profile } = await supabase
           .from("profiles")
           .select("id")
-          .eq("id", session.user.id)
+          .eq("id", newSession.user.id)
           .single();
 
-        if (!profile) {
+        if (!profile && mounted) {
           await supabase.from("profiles").insert({
-            id: session.user.id,
-            username: session.user.email?.split("@")[0] || `hunter_${Date.now().toString(36)}`,
-            full_name: session.user.user_metadata.full_name || null,
+            id: newSession.user.id,
+            username: newSession.user.email?.split("@")[0] || `hunter_${Date.now().toString(36)}`,
+            full_name: newSession.user.user_metadata.full_name || null,
           });
         }
       }
+
+      // Reset data when logging out
+      if (!newSession) {
+        setDataLoaded(false);
+        setHunts([]);
+        setFilteredHunts([]);
+        setCompleted([]);
+      }
     });
 
-    return () => listener?.subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      listener?.subscription.unsubscribe();
+    };
   }, []);
 
-  // ─── LOAD DATA FUNCTIONS (stable, no deps that change) ─────────────────────
-  const loadProgressAndHunts = useCallback(async (filterToApply = "All") => {
-    if (!session || loadingDataRef.current) return;
+  // ─── LOAD DATA FUNCTIONS ─────────────────────
+  const loadProgressAndHunts = useCallback(async () => {
+    if (!session || loadingDataRef.current || showAdmin) {
+      return;
+    }
     
     loadingDataRef.current = true;
     
     try {
       setError("");
 
+      // Load progress
       const { data: progressRows, error: progressError } = await supabase
         .from("user_progress")
         .select("*")
@@ -174,6 +224,7 @@ export default function App() {
       if (progress) {
         completedIds = Array.isArray(progress.completed_hunt_ids) ? progress.completed_hunt_ids : [];
 
+        // Handle duplicate progress rows
         if (progressRows.length > 1) {
           const all = new Set();
           let maxTotal = 0, maxStreak = 0;
@@ -185,6 +236,8 @@ export default function App() {
           completedIds = Array.from(all);
           setTotalHunts(completedIds.length);
           setStreak(maxStreak);
+          
+          // Delete duplicates
           for (let i = 1; i < progressRows.length; i++) {
             await supabase.from("user_progress").delete().eq("id", progressRows[i].id);
           }
@@ -205,7 +258,7 @@ export default function App() {
         setLastActive(null);
       }
 
-      // Load all hunts (no date restriction on server)
+      // Load all hunts
       const { data: huntsData, error: huntsError } = await supabase
         .from("hunts")
         .select("*")
@@ -214,24 +267,21 @@ export default function App() {
       if (huntsError) throw huntsError;
 
       const today = new Date();
+      today.setHours(0, 0, 0, 0); // Normalize to start of day
 
       // Client-side filter: active if started on/before today AND still within validity period
       const activeHunts = (huntsData || []).filter((hunt) => {
         const huntDate = new Date(hunt.date);
-        const validity = hunt.validity_days || 7; // default 7 days
+        huntDate.setHours(0, 0, 0, 0);
+        const validity = hunt.validity_days || 7;
         const expiryDate = new Date(huntDate);
         expiryDate.setDate(huntDate.getDate() + validity);
+        expiryDate.setHours(23, 59, 59, 999);
 
         return huntDate <= today && today <= expiryDate;
       });
 
       setHunts(activeHunts);
-
-      // Apply category filter + remove completed
-      let filtered = activeHunts.filter((h) => !completedIds.includes(h.id));
-      if (filterToApply !== "All") filtered = filtered.filter((h) => h.category === filterToApply);
-      setFilteredHunts(filtered);
-      
       setDataLoaded(true);
     } catch (e) {
       console.error("Load error:", e);
@@ -240,36 +290,11 @@ export default function App() {
     } finally {
       loadingDataRef.current = false;
     }
-  }, [session]);
-
-  const fetchHunts = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from("hunts")
-        .select("*")
-        .order("date", { ascending: false });
-      
-      if (error) throw error;
-
-      const today = new Date();
-
-      const activeHunts = (data || []).filter((hunt) => {
-        const huntDate = new Date(hunt.date);
-        const validity = hunt.validity_days || 7;
-        const expiryDate = new Date(huntDate);
-        expiryDate.setDate(huntDate.getDate() + validity);
-
-        return huntDate <= today && today <= expiryDate;
-      });
-
-      setHunts(activeHunts);
-    } catch (e) {
-      console.error("Fetch hunts error:", e);
-      setError("Failed to fetch hunts");
-    }
-  }, []);
+  }, [session, showAdmin]);
 
   const loadAdminData = useCallback(async () => {
+    if (!session || !isAdmin) return;
+
     try {
       setError("");
       const { data: allHunts, error: huntsError } = await supabase
@@ -302,27 +327,40 @@ export default function App() {
       console.error("Admin data load error:", e);
       setError("Failed to load admin data");
     }
-  }, []);
+  }, [session, isAdmin]);
 
-  // ─── INITIAL LOAD ONLY ─────────────────────
+  // ─── INITIAL LOAD ─────────────────────
   useEffect(() => {
-    if (!session) return;
+    if (!session || initializing) return;
     
-    if (showAdmin) {
+    if (showAdmin && isAdmin) {
       loadAdminData();
-    } else {
-      loadProgressAndHunts(activeFilter);
+    } else if (!showAdmin) {
+      loadProgressAndHunts();
     }
-  }, [session, showAdmin]);
+  }, [session, showAdmin, isAdmin, initializing]);
+
+  // ─── FILTER APPLICATION ─────────────────────
+  useEffect(() => {
+    if (!dataLoaded || showAdmin) return;
+
+    let filtered = hunts.filter((h) => !completed.includes(h.id));
+    if (activeFilter !== "All") {
+      filtered = filtered.filter((h) => h.category === activeFilter);
+    }
+    setFilteredHunts(filtered);
+  }, [hunts, completed, activeFilter, dataLoaded, showAdmin]);
 
   // ─── REALTIME SUBSCRIPTIONS ─────────────────────
   useEffect(() => {
-    if (!session || showAdmin) return;
+    if (!session || showAdmin || !dataLoaded) return;
 
     const huntsChannel = supabase
       .channel("hunts-changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "hunts" }, () => {
-        fetchHunts();
+        if (!loadingDataRef.current) {
+          loadProgressAndHunts();
+        }
       })
       .subscribe();
 
@@ -338,7 +376,7 @@ export default function App() {
         },
         () => {
           if (!loadingDataRef.current) {
-            loadProgressAndHunts(activeFilter);
+            loadProgressAndHunts();
           }
         }
       )
@@ -348,21 +386,21 @@ export default function App() {
       supabase.removeChannel(huntsChannel);
       supabase.removeChannel(progressChannel);
     };
-  }, [session, showAdmin]);
-
-  // Apply filters whenever they change
-  useEffect(() => {
-    if (dataLoaded && hunts.length > 0) {
-      let filtered = hunts.filter((h) => !completed.includes(h.id));
-      if (activeFilter !== "All") filtered = filtered.filter((h) => h.category === activeFilter);
-      setFilteredHunts(filtered);
-    }
-  }, [hunts, completed, activeFilter, dataLoaded]);
+  }, [session, showAdmin, dataLoaded, loadProgressAndHunts]);
 
   // ─── SELFIE UPLOAD ─────────────────────
   const uploadSelfie = useCallback(async () => {
     if (!selfieFile || !currentHunt || uploading || !session) return;
-    if (completed.includes(currentHunt.id)) {
+    
+    // Check completion status with latest state
+    const { data: progressCheck } = await supabase
+      .from("user_progress")
+      .select("completed_hunt_ids")
+      .eq("user_id", session.user.id)
+      .single();
+
+    const currentCompleted = progressCheck?.completed_hunt_ids || [];
+    if (currentCompleted.includes(currentHunt.id)) {
       alert("You have already completed this hunt!");
       setShowModal(false);
       setSelfieFile(null);
@@ -408,7 +446,7 @@ export default function App() {
       const fileExt = selfieFile.name.split(".").pop()?.toLowerCase() || "jpg";
       const fileName = `uploads/${session.user.id}/${currentHunt.id}_${Date.now()}.${fileExt}`;
 
-      const { error: uploadError, data: uploadData } = await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from("user-uploads")
         .upload(fileName, selfieFile, {
           cacheControl: '3600',
@@ -436,11 +474,25 @@ export default function App() {
         throw new Error(`Database insert failed: ${insertError.message}`);
       }
 
-      const newCompleted = [...new Set([...completed, currentHunt.id])];
+      // Fetch latest progress to avoid race conditions
+      const { data: latestProgress } = await supabase
+        .from("user_progress")
+        .select("*")
+        .eq("user_id", session.user.id)
+        .single();
+
+      const currentCompletedIds = latestProgress?.completed_hunt_ids || [];
+      const newCompleted = [...new Set([...currentCompletedIds, currentHunt.id])];
+      
       const today = getTodayLocalDate();
-      let newStreak = streak;
-      if (lastActive === getYesterdayLocalDate()) newStreak = streak + 1;
-      else if (lastActive !== today) newStreak = 1;
+      const lastActiveDate = latestProgress?.last_active;
+      let newStreak = latestProgress?.streak || 0;
+      
+      if (lastActiveDate === getYesterdayLocalDate()) {
+        newStreak = newStreak + 1;
+      } else if (lastActiveDate !== today) {
+        newStreak = 1;
+      }
 
       const newTier = newCompleted.length >= 20 ? "Legend" : newCompleted.length >= 10 ? "Pro" : newCompleted.length >= 5 ? "Hunter" : "Newbie";
 
@@ -456,6 +508,7 @@ export default function App() {
         { onConflict: "user_id" }
       );
 
+      // Update local state
       setCompleted(newCompleted);
       setTotalHunts(newCompleted.length);
       setStreak(newStreak);
@@ -472,7 +525,7 @@ export default function App() {
     } finally {
       setUploading(false);
     }
-  }, [selfieFile, currentHunt, uploading, completed, session, streak, lastActive]);
+  }, [selfieFile, currentHunt, uploading, session]);
 
   // ─── LEADERBOARD ─────────────────────
   const loadLeaderboard = useCallback(async () => {
@@ -769,6 +822,8 @@ export default function App() {
     if (!window.confirm("Sign out?")) return;
     await supabase.auth.signOut();
     setSession(null);
+    setDataLoaded(false);
+    setShowAdmin(false);
   };
 
   // ─── ADMIN PANEL ─────────────────────
@@ -1063,6 +1118,18 @@ export default function App() {
             </div>
           </div>
         )}
+      </div>
+    );
+  }
+
+  // ─── INITIAL LOADING SCREEN ─────────────────────
+  if (initializing) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-16 w-16 border-b-4 border-amber-600 mb-6"></div>
+          <p className="text-2xl text-amber-900 font-bold">Initializing...</p>
+        </div>
       </div>
     );
   }
