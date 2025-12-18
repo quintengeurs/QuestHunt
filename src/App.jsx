@@ -14,7 +14,18 @@ const supabaseUrl = "https://eeboxlitezqgjyrnssgx.supabase.co";
 const supabaseAnonKey =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlYm94bGl0ZXpxZ2p5cm5zc2d4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2NjcyNTksImV4cCI6MjA4MDI0MzI1OX0.8VlGLHjEv_0aGWOjiDuLLziOCnUqciIAEWayMUGsXT8";
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    flowType: 'pkce'
+  }
+});
+
+// Verify Supabase client is working
+console.log("Supabase client initialized:", !!supabase.auth);
+
 const ADMIN_EMAIL = "quinten.geurs@gmail.com";
 
 const getSafePhotoUrl = (url) => {
@@ -118,62 +129,85 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
     let timeoutId;
+    let sessionResolved = false;
 
     const initAuth = async () => {
       try {
-        // Set timeout to prevent infinite initialization
-        timeoutId = setTimeout(() => {
-          if (mounted && initializing) {
-            console.warn("Auth initialization timeout - proceeding without session");
-            setSession(null);
-            setInitializing(false);
-          }
-        }, 3000); // Reduced to 3 second timeout
-
-        const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession();
+        console.log("Auth init: Starting");
         
-        // Clear timeout if we got a response
+        // Set aggressive timeout
+        timeoutId = setTimeout(() => {
+          if (mounted && !sessionResolved) {
+            console.warn("Auth timeout - checking localStorage directly");
+            // Try to get session from localStorage as fallback
+            try {
+              const keys = Object.keys(localStorage);
+              const authKey = keys.find(k => k.includes('supabase.auth.token'));
+              if (authKey) {
+                console.log("Found auth token in localStorage, will let auth listener handle it");
+              } else {
+                console.log("No auth token found, showing login");
+                setSession(null);
+                setInitializing(false);
+                sessionResolved = true;
+              }
+            } catch (e) {
+              console.error("localStorage check failed:", e);
+              setSession(null);
+              setInitializing(false);
+              sessionResolved = true;
+            }
+          }
+        }, 2000); // 2 second timeout
+
+        // Try to get session, but don't wait forever
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Session fetch timeout')), 2500)
+        );
+
+        const result = await Promise.race([sessionPromise, timeoutPromise])
+          .catch(err => {
+            console.error("Session fetch failed:", err);
+            return { data: { session: null }, error: err };
+          });
+
+        sessionResolved = true;
         clearTimeout(timeoutId);
         
-        if (sessionError) {
-          console.error("Session error:", sessionError);
-        }
+        const currentSession = result?.data?.session;
         
         if (!mounted) return;
         
+        console.log("Auth init: Got session:", !!currentSession);
         setSession(currentSession);
+        
         if (currentSession?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
           setIsAdmin(true);
         }
         setInitializing(false);
 
-        // Create profile if needed
+        // Create profile if needed - but don't block on it
         if (currentSession) {
-          try {
-            const { data: profile, error: profileError } = await supabase
-              .from("profiles")
-              .select("id")
-              .eq("id", currentSession.user.id)
-              .maybeSingle();
-
-            if (profileError) {
-              console.error("Profile check error:", profileError);
-            }
-
-            if (!profile && mounted) {
-              const { error: insertError } = await supabase.from("profiles").insert({
-                id: currentSession.user.id,
-                username: currentSession.user.email?.split("@")[0] || `hunter_${Date.now().toString(36)}`,
-                full_name: currentSession.user.user_metadata.full_name || null,
-              });
+          supabase
+            .from("profiles")
+            .select("id")
+            .eq("id", currentSession.user.id)
+            .maybeSingle()
+            .then(({ data: profile, error }) => {
+              if (error) console.error("Profile check error:", error);
               
-              if (insertError) {
-                console.error("Profile creation error:", insertError);
+              if (!profile && mounted) {
+                supabase.from("profiles").insert({
+                  id: currentSession.user.id,
+                  username: currentSession.user.email?.split("@")[0] || `hunter_${Date.now().toString(36)}`,
+                  full_name: currentSession.user.user_metadata.full_name || null,
+                }).then(({ error: insertError }) => {
+                  if (insertError) console.error("Profile creation error:", insertError);
+                });
               }
-            }
-          } catch (profileErr) {
-            console.error("Profile operation failed:", profileErr);
-          }
+            })
+            .catch(err => console.error("Profile operation failed:", err));
         }
       } catch (err) {
         console.error("Auth initialization error:", err);
@@ -181,6 +215,7 @@ export default function App() {
           setSession(null);
           setInitializing(false);
           clearTimeout(timeoutId);
+          sessionResolved = true;
         }
       }
     };
