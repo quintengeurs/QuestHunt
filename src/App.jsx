@@ -131,16 +131,39 @@ export default function App() {
     let timeoutId;
     let hasReceivedAuthEvent = false;
 
-    // Set a safety timeout to ensure initialization completes
+    console.log("Auth init: Setting up listener");
+
+    // Immediately check for existing session in localStorage
+    const checkInitialSession = () => {
+      try {
+        const keys = Object.keys(localStorage);
+        const hasAuthToken = keys.some(k => k.includes('supabase.auth.token'));
+        console.log("Initial localStorage check - has auth token:", hasAuthToken);
+        
+        if (!hasAuthToken) {
+          // No token in localStorage, we can immediately show login
+          console.log("No auth token found, showing login immediately");
+          setSession(null);
+          setInitializing(false);
+          hasReceivedAuthEvent = true;
+          clearTimeout(timeoutId);
+        }
+      } catch (e) {
+        console.error("localStorage check failed:", e);
+      }
+    };
+
+    // Check immediately
+    checkInitialSession();
+
+    // Set a safety timeout
     timeoutId = setTimeout(() => {
       if (mounted && !hasReceivedAuthEvent) {
-        console.log("Safety timeout - no auth event received, marking initialization complete with no session");
+        console.log("Safety timeout - no auth event received, setting session to null");
         setSession(null);
         setInitializing(false);
       }
     }, 3000);
-
-    console.log("Auth init: Setting up listener (will rely on onAuthStateChange)");
 
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       console.log("Auth state change:", event, "Session:", !!newSession);
