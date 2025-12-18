@@ -19,12 +19,9 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    flowType: 'pkce'
-  }
+    flowType: "pkce",
+  },
 });
-
-// Verify Supabase client is working
-console.log("Supabase client initialized:", !!supabase.auth);
 
 const ADMIN_EMAIL = "quinten.geurs@gmail.com";
 
@@ -121,135 +118,87 @@ export default function App() {
   const [newHuntPhoto, setNewHuntPhoto] = useState(null);
   const [creatingHunt, setCreatingHunt] = useState(false);
 
-  // Refs to prevent race conditions
+  // Ref to prevent race conditions
   const loadingDataRef = useRef(false);
-  const isUnmounted = useRef(false);
 
-  // ─── AUTH & PROFILE AUTO-CREATE ─────────────────────
+  // ─── AUTH INITIALIZATION (FIXED) ─────────────────────
   useEffect(() => {
     let mounted = true;
-    let timeoutId;
-    let hasReceivedAuthEvent = false;
 
-    console.log("Auth init: Setting up listener");
+    // Get the current session immediately on mount
+    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
+      if (!mounted) return;
 
-    // Immediately check for existing session in localStorage
-    const checkInitialSession = () => {
-      try {
-        const keys = Object.keys(localStorage);
-        const hasAuthToken = keys.some(k => k.includes('supabase.auth.token'));
-        console.log("Initial localStorage check - has auth token:", hasAuthToken);
-        
-        if (!hasAuthToken) {
-          // No token in localStorage, we can immediately show login
-          console.log("No auth token found, showing login immediately");
-          setSession(null);
-          setInitializing(false);
-          hasReceivedAuthEvent = true;
-          clearTimeout(timeoutId);
-        }
-      } catch (e) {
-        console.error("localStorage check failed:", e);
-      }
-    };
+      console.log("Initial session loaded:", !!currentSession);
+      setSession(currentSession);
 
-    // Check immediately
-    checkInitialSession();
-
-    // Set a safety timeout
-    timeoutId = setTimeout(() => {
-      if (mounted && !hasReceivedAuthEvent) {
-        console.log("Safety timeout - no auth event received, setting session to null");
-        setSession(null);
-        setInitializing(false);
-      }
-    }, 3000);
-
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, newSession) => {
-      console.log("Auth state change:", event, "Session:", !!newSession);
-      
-      hasReceivedAuthEvent = true;
-      
-      if (!mounted) {
-        console.log("Component unmounted, ignoring auth change");
-        return;
+      if (currentSession?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+        setIsAdmin(true);
+      } else {
+        setIsAdmin(false);
       }
 
-      // Clear the safety timeout since we got a response
-      clearTimeout(timeoutId);
+      setInitializing(false);
+    });
 
-      // Validate the session has required data
-      const isValidSession = newSession && newSession.user && newSession.access_token;
-      
-      console.log("Auth listener - Valid session:", isValidSession);
-      
-      if (isValidSession) {
-        setSession(newSession);
-        setInitializing(false);
-        
-        if (newSession.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-          setIsAdmin(true);
-        } else {
-          setIsAdmin(false);
-          setShowAdmin(false);
-        }
+    // Listen for any auth changes (sign in, sign out, token refresh, etc.)
+    const {
+      data: { subscription: listener },
+    } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      if (!mounted) return;
 
-        // Create profile if needed
+      console.log("Auth event:", event, "Session:", !!newSession);
+
+      setSession(newSession);
+
+      if (newSession?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+        setIsAdmin(true);
+      } else {
+        setIsAdmin(false);
+        setShowAdmin(false);
+      }
+
+      // Clear user data on sign out
+      if (!newSession) {
+        setDataLoaded(false);
+        setHunts([]);
+        setFilteredHunts([]);
+        setCompleted([]);
+      }
+
+      // Auto-create profile on sign-in (only if needed)
+      if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && newSession?.user) {
         const { data: profile } = await supabase
           .from("profiles")
           .select("id")
           .eq("id", newSession.user.id)
           .maybeSingle();
 
-        if (!profile && mounted) {
+        if (!profile) {
           await supabase.from("profiles").insert({
             id: newSession.user.id,
             username: newSession.user.email?.split("@")[0] || `hunter_${Date.now().toString(36)}`,
             full_name: newSession.user.user_metadata.full_name || null,
           });
         }
-      } else {
-        // No valid session - clear everything
-        console.log("No valid session, clearing state");
-        setSession(null);
-        setInitializing(false);
-        setIsAdmin(false);
-        setShowAdmin(false);
-        setDataLoaded(false);
-        setHunts([]);
-        setFilteredHunts([]);
-        setCompleted([]);
       }
     });
 
     return () => {
       mounted = false;
-      clearTimeout(timeoutId);
-      listener?.subscription.unsubscribe();
+      listener.unsubscribe();
     };
   }, []);
 
   // ─── LOAD DATA FUNCTIONS ─────────────────────
   const loadProgressAndHunts = useCallback(async () => {
-    // Strict guards to prevent loading loops
-    if (!session) {
-      console.log("loadProgressAndHunts: No session, skipping");
-      return;
-    }
-    
-    if (loadingDataRef.current) {
-      console.log("loadProgressAndHunts: Already loading, skipping");
-      return;
-    }
-    
-    if (showAdmin) {
-      console.log("loadProgressAndHunts: In admin mode, skipping");
-      return;
-    }
-    
-    console.log("loadProgressAndHunts: Starting data load");
+    if (!session) return;
+    if (loadingDataRef.current) return;
+    if (showAdmin) return;
+
+    console.log("Loading user progress and hunts...");
     loadingDataRef.current = true;
-    
+
     try {
       setError("");
 
@@ -271,7 +220,8 @@ export default function App() {
         // Handle duplicate progress rows
         if (progressRows.length > 1) {
           const all = new Set();
-          let maxTotal = 0, maxStreak = 0;
+          let maxTotal = 0,
+            maxStreak = 0;
           progressRows.forEach((r) => {
             if (Array.isArray(r.completed_hunt_ids)) r.completed_hunt_ids.forEach((id) => all.add(id));
             maxTotal = Math.max(maxTotal, r.total_hunts || 0);
@@ -280,7 +230,7 @@ export default function App() {
           completedIds = Array.from(all);
           setTotalHunts(completedIds.length);
           setStreak(maxStreak);
-          
+
           // Delete duplicates
           for (let i = 1; i < progressRows.length; i++) {
             await supabase.from("user_progress").delete().eq("id", progressRows[i].id);
@@ -291,7 +241,13 @@ export default function App() {
         }
         setCompleted(completedIds);
         setTier(
-          completedIds.length >= 20 ? "Legend" : completedIds.length >= 10 ? "Pro" : completedIds.length >= 5 ? "Hunter" : "Newbie"
+          completedIds.length >= 20
+            ? "Legend"
+            : completedIds.length >= 10
+            ? "Pro"
+            : completedIds.length >= 5
+            ? "Hunter"
+            : "Newbie"
         );
         setLastActive(progress.last_active || null);
       } else {
@@ -311,9 +267,8 @@ export default function App() {
       if (huntsError) throw huntsError;
 
       const today = new Date();
-      today.setHours(0, 0, 0, 0); // Normalize to start of day
+      today.setHours(0, 0, 0, 0);
 
-      // Client-side filter: active if started on/before today AND still within validity period
       const activeHunts = (huntsData || []).filter((hunt) => {
         const huntDate = new Date(hunt.date);
         huntDate.setHours(0, 0, 0, 0);
@@ -327,14 +282,13 @@ export default function App() {
 
       setHunts(activeHunts);
       setDataLoaded(true);
-      console.log("loadProgressAndHunts: Complete - loaded", activeHunts.length, "hunts");
+      console.log("Data loaded successfully:", activeHunts.length, "active hunts");
     } catch (e) {
       console.error("Load error:", e);
       setError("Failed to load hunts. Please refresh.");
       setDataLoaded(true);
     } finally {
       loadingDataRef.current = false;
-      console.log("loadProgressAndHunts: Loading flag reset");
     }
   }, [session, showAdmin]);
 
@@ -347,7 +301,7 @@ export default function App() {
         .from("hunts")
         .select("*")
         .order("date", { ascending: false });
-      
+
       if (huntsError) throw huntsError;
       setAdminHunts(allHunts || []);
 
@@ -375,43 +329,15 @@ export default function App() {
     }
   }, [session, isAdmin]);
 
-  // ─── INITIAL LOAD ─────────────────────
+  // ─── INITIAL DATA LOAD ─────────────────────
   useEffect(() => {
-    console.log("Initial load effect:", { 
-      session,
-      sessionType: typeof session,
-      sessionNull: session === null,
-      sessionUndefined: session === undefined,
-      hasTruthySession: !!session,
-      initializing, 
-      showAdmin, 
-      isAdmin,
-      dataLoaded 
-    });
-    
-    // Don't load if still initializing
-    if (initializing) {
-      console.log("Initial load: Skipping - still initializing");
-      return;
-    }
-    
-    // Don't load if no session - use explicit null/undefined check
-    if (session === null || session === undefined || !session) {
-      console.log("Initial load: Skipping - no session (null/undefined/falsy)");
-      return;
-    }
-    
-    // Don't reload if data is already loaded
-    if (dataLoaded && !showAdmin) {
-      console.log("Initial load: Skipping - data already loaded");
-      return;
-    }
-    
+    if (initializing) return;
+    if (!session) return;
+    if (dataLoaded && !showAdmin) return;
+
     if (showAdmin && isAdmin) {
-      console.log("Initial load: Loading admin data");
       loadAdminData();
     } else if (!showAdmin) {
-      console.log("Initial load: Loading progress and hunts");
       loadProgressAndHunts();
     }
   }, [session, showAdmin, isAdmin, initializing, dataLoaded, loadAdminData, loadProgressAndHunts]);
@@ -467,8 +393,8 @@ export default function App() {
   // ─── SELFIE UPLOAD ─────────────────────
   const uploadSelfie = useCallback(async () => {
     if (!selfieFile || !currentHunt || uploading || !session) return;
-    
-    // Check completion status with latest state
+
+    // Double-check completion status
     const { data: progressCheck } = await supabase
       .from("user_progress")
       .select("completed_hunt_ids")
@@ -510,13 +436,13 @@ export default function App() {
         return;
       }
 
-      const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+      const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
       if (!allowedTypes.includes(selfieFile.type)) {
-        throw new Error('Invalid file type. Please upload a JPG, PNG, or WebP image.');
+        throw new Error("Invalid file type. Please upload a JPG, PNG, or WebP image.");
       }
 
       if (selfieFile.size > 5 * 1024 * 1024) {
-        throw new Error('File too large. Maximum size is 5MB.');
+        throw new Error("File too large. Maximum size is 5MB.");
       }
 
       const fileExt = selfieFile.name.split(".").pop()?.toLowerCase() || "jpg";
@@ -525,8 +451,8 @@ export default function App() {
       const { error: uploadError } = await supabase.storage
         .from("user-uploads")
         .upload(fileName, selfieFile, {
-          cacheControl: '3600',
-          upsert: false
+          cacheControl: "3600",
+          upsert: false,
         });
 
       if (uploadError) {
@@ -550,7 +476,7 @@ export default function App() {
         throw new Error(`Database insert failed: ${insertError.message}`);
       }
 
-      // Fetch latest progress to avoid race conditions
+      // Fetch latest progress
       const { data: latestProgress } = await supabase
         .from("user_progress")
         .select("*")
@@ -559,18 +485,25 @@ export default function App() {
 
       const currentCompletedIds = latestProgress?.completed_hunt_ids || [];
       const newCompleted = [...new Set([...currentCompletedIds, currentHunt.id])];
-      
+
       const today = getTodayLocalDate();
       const lastActiveDate = latestProgress?.last_active;
       let newStreak = latestProgress?.streak || 0;
-      
+
       if (lastActiveDate === getYesterdayLocalDate()) {
         newStreak = newStreak + 1;
       } else if (lastActiveDate !== today) {
         newStreak = 1;
       }
 
-      const newTier = newCompleted.length >= 20 ? "Legend" : newCompleted.length >= 10 ? "Pro" : newCompleted.length >= 5 ? "Hunter" : "Newbie";
+      const newTier =
+        newCompleted.length >= 20
+          ? "Legend"
+          : newCompleted.length >= 10
+          ? "Pro"
+          : newCompleted.length >= 5
+          ? "Hunter"
+          : "Newbie";
 
       await supabase.from("user_progress").upsert(
         {
@@ -647,7 +580,13 @@ export default function App() {
 
   // ─── CREATE HUNT ─────────────────────
   const createHunt = useCallback(async () => {
-    if (!newHuntBusinessName.trim() || !newHuntRiddle.trim() || !newHuntCode.trim() || !newHuntLat || !newHuntLon) {
+    if (
+      !newHuntBusinessName.trim() ||
+      !newHuntRiddle.trim() ||
+      !newHuntCode.trim() ||
+      !newHuntLat ||
+      !newHuntLon
+    ) {
       alert("Please fill all required fields");
       return;
     }
@@ -713,40 +652,54 @@ export default function App() {
       setCreatingHunt(false);
     }
   }, [
-    newHuntDate, newHuntCategory, newHuntRiddle, newHuntBusinessName,
-    newHuntCode, newHuntDiscount, newHuntLat, newHuntLon, newHuntRadius,
-    newHuntPhoto, loadAdminData
+    newHuntDate,
+    newHuntCategory,
+    newHuntRiddle,
+    newHuntBusinessName,
+    newHuntCode,
+    newHuntDiscount,
+    newHuntLat,
+    newHuntLon,
+    newHuntRadius,
+    newHuntPhoto,
+    loadAdminData,
   ]);
 
   // ─── ADMIN APPROVE / REJECT ─────────────────────
-  const approveSelfie = useCallback(async (id) => {
-    setProcessingSubmission(id);
-    try {
-      const { error } = await supabase.from("user-uploads").update({ approved: true }).eq("id", id);
-      if (error) throw error;
-      await loadAdminData();
-    } catch (err) {
-      console.error("Approve error:", err);
-      alert("Failed to approve");
-    } finally {
-      setProcessingSubmission(null);
-    }
-  }, [loadAdminData]);
+  const approveSelfie = useCallback(
+    async (id) => {
+      setProcessingSubmission(id);
+      try {
+        const { error } = await supabase.from("user-uploads").update({ approved: true }).eq("id", id);
+        if (error) throw error;
+        await loadAdminData();
+      } catch (err) {
+        console.error("Approve error:", err);
+        alert("Failed to approve");
+      } finally {
+        setProcessingSubmission(null);
+      }
+    },
+    [loadAdminData]
+  );
 
-  const rejectSelfie = useCallback(async (id) => {
-    if (!window.confirm("Reject this submission?")) return;
-    setProcessingSubmission(id);
-    try {
-      const { error } = await supabase.from("user-uploads").delete().eq("id", id);
-      if (error) throw error;
-      await loadAdminData();
-    } catch (err) {
-      console.error("Reject error:", err);
-      alert("Failed to reject");
-    } finally {
-      setProcessingSubmission(null);
-    }
-  }, [loadAdminData]);
+  const rejectSelfie = useCallback(
+    async (id) => {
+      if (!window.confirm("Reject this submission?")) return;
+      setProcessingSubmission(id);
+      try {
+        const { error } = await supabase.from("user-uploads").delete().eq("id", id);
+        if (error) throw error;
+        await loadAdminData();
+      } catch (err) {
+        console.error("Reject error:", err);
+        alert("Failed to reject");
+      } finally {
+        setProcessingSubmission(null);
+      }
+    },
+    [loadAdminData]
+  );
 
   // ─── EDIT HUNT ─────────────────────
   const startEditHunt = useCallback((hunt) => {
@@ -766,7 +719,13 @@ export default function App() {
 
   const updateHunt = useCallback(async () => {
     if (!editingHunt) return;
-    if (!newHuntBusinessName.trim() || !newHuntRiddle.trim() || !newHuntCode.trim() || !newHuntLat || !newHuntLon) {
+    if (
+      !newHuntBusinessName.trim() ||
+      !newHuntRiddle.trim() ||
+      !newHuntCode.trim() ||
+      !newHuntLat ||
+      !newHuntLon
+    ) {
       alert("Please fill all required fields");
       return;
     }
@@ -832,26 +791,38 @@ export default function App() {
       setCreatingHunt(false);
     }
   }, [
-    editingHunt, newHuntDate, newHuntCategory, newHuntRiddle, newHuntBusinessName,
-    newHuntCode, newHuntDiscount, newHuntLat, newHuntLon, newHuntRadius,
-    newHuntPhoto, loadAdminData
+    editingHunt,
+    newHuntDate,
+    newHuntCategory,
+    newHuntRiddle,
+    newHuntBusinessName,
+    newHuntCode,
+    newHuntDiscount,
+    newHuntLat,
+    newHuntLon,
+    newHuntRadius,
+    newHuntPhoto,
+    loadAdminData,
   ]);
 
-  const deleteHunt = useCallback(async (id) => {
-    if (!window.confirm("Are you sure you want to delete this hunt? This cannot be undone.")) return;
-    
-    try {
-      const { error } = await supabase.from("hunts").delete().eq("id", id);
-      if (error) throw error;
-      alert("Hunt deleted successfully!");
-      loadAdminData();
-    } catch (err) {
-      console.error("Delete hunt error:", err);
-      alert("Failed to delete hunt: " + (err.message || "Unknown error"));
-    }
-  }, [loadAdminData]);
+  const deleteHunt = useCallback(
+    async (id) => {
+      if (!window.confirm("Are you sure you want to delete this hunt? This cannot be undone.")) return;
 
-  // ─── AUTH ─────────────────────
+      try {
+        const { error } = await supabase.from("hunts").delete().eq("id", id);
+        if (error) throw error;
+        alert("Hunt deleted successfully!");
+        loadAdminData();
+      } catch (err) {
+        console.error("Delete hunt error:", err);
+        alert("Failed to delete hunt: " + (err.message || "Unknown error"));
+      }
+    },
+    [loadAdminData]
+  );
+
+  // ─── AUTH FUNCTIONS ─────────────────────
   const signUp = async () => {
     if (!email.trim() || !password) {
       setAuthError("Please enter email and password");
@@ -902,7 +873,9 @@ export default function App() {
     setShowAdmin(false);
   };
 
-  // ─── ADMIN PANEL ─────────────────────
+  // ─── RENDER ─────────────────────
+
+  // Admin Panel
   if (showAdmin) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-50">
@@ -912,10 +885,16 @@ export default function App() {
             Admin Panel
           </h1>
           <div className="flex gap-4">
-            <button onClick={() => setShowAdmin(false)} className="px-6 py-3 bg-gray-200 hover:bg-gray-300 rounded-full font-bold">
+            <button
+              onClick={() => setShowAdmin(false)}
+              className="px-6 py-3 bg-gray-200 hover:bg-gray-300 rounded-full font-bold"
+            >
               Back to App
             </button>
-            <button onClick={signOut} className="text-gray-600 hover:text-gray-800 flex items-center gap-2">
+            <button
+              onClick={signOut}
+              className="text-gray-600 hover:text-gray-800 flex items-center gap-2"
+            >
               <LogOut size={20} /> Log Out
             </button>
           </div>
@@ -925,19 +904,31 @@ export default function App() {
           <div className="flex gap-8 mb-12 border-b-4 border-amber-200">
             <button
               onClick={() => setAdminTab("hunts")}
-              className={`pb-4 px-6 text-2xl font-bold ${adminTab === "hunts" ? "text-amber-600 border-b-4 border-amber-600" : "text-gray-600"}`}
+              className={`pb-4 px-6 text-2xl font-bold ${
+                adminTab === "hunts"
+                  ? "text-amber-600 border-b-4 border-amber-600"
+                  : "text-gray-600"
+              }`}
             >
               All Hunts ({adminHunts.length})
             </button>
             <button
               onClick={() => setAdminTab("selfies")}
-              className={`pb-4 px-6 text-2xl font-bold ${adminTab === "selfies" ? "text-amber-600 border-b-4 border-amber-600" : "text-gray-600"}`}
+              className={`pb-4 px-6 text-2xl font-bold ${
+                adminTab === "selfies"
+                  ? "text-amber-600 border-b-4 border-amber-600"
+                  : "text-gray-600"
+              }`}
             >
               Pending ({selfies.filter((s) => !s.approved).length})
             </button>
             <button
               onClick={() => setAdminTab("create")}
-              className={`pb-4 px-6 text-2xl font-bold ${adminTab === "create" ? "text-amber-600 border-b-4 border-amber-600" : "text-gray-600"}`}
+              className={`pb-4 px-6 text-2xl font-bold ${
+                adminTab === "create"
+                  ? "text-amber-600 border-b-4 border-amber-600"
+                  : "text-gray-600"
+              }`}
             >
               + Create Hunt
             </button>
@@ -953,17 +944,33 @@ export default function App() {
               ) : (
                 <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
                   {adminHunts.map((hunt) => (
-                    <div key={hunt.id} className="bg-white rounded-3xl shadow-2xl overflow-hidden">
-                      <img src={getSafePhotoUrl(hunt.photo)} alt={hunt.business_name} className="w-full h-64 object-cover" />
+                    <div
+                      key={hunt.id}
+                      className="bg-white rounded-3xl shadow-2xl overflow-hidden"
+                    >
+                      <img
+                        src={getSafePhotoUrl(hunt.photo)}
+                        alt={hunt.business_name}
+                        className="w-full h-64 object-cover"
+                      />
                       <div className="p-6">
                         <span className="inline-block px-4 py-1 bg-amber-200 text-amber-800 rounded-full text-xs font-bold mb-3">
                           {hunt.category}
                         </span>
-                        <h3 className="text-2xl font-black text-amber-900 mb-2">{hunt.business_name}</h3>
+                        <h3 className="text-2xl font-black text-amber-900 mb-2">
+                          {hunt.business_name}
+                        </h3>
                         <p className="text-gray-600 italic mb-4">"{hunt.riddle}"</p>
-                        <p className="text-sm"><strong>Code:</strong> {hunt.code}</p>
-                        <p className="text-sm"><strong>Date:</strong> {new Date(hunt.date).toLocaleDateString()}</p>
-                        <p className="text-sm mb-4"><strong>Radius:</strong> {hunt.radius}m</p>
+                        <p className="text-sm">
+                          <strong>Code:</strong> {hunt.code}
+                        </p>
+                        <p className="text-sm">
+                          <strong>Date:</strong>{" "}
+                          {new Date(hunt.date).toLocaleDateString()}
+                        </p>
+                        <p className="text-sm mb-4">
+                          <strong>Radius:</strong> {hunt.radius}m
+                        </p>
                         <div className="flex gap-3">
                           <button
                             onClick={() => startEditHunt(hunt)}
@@ -990,16 +997,29 @@ export default function App() {
           {adminTab === "selfies" && (
             <>
               {selfies.filter((s) => !s.approved).length === 0 ? (
-                <p className="text-center text-gray-600 text-xl py-12">No pending selfies</p>
+                <p className="text-center text-gray-600 text-xl py-12">
+                  No pending selfies
+                </p>
               ) : (
                 selfies
                   .filter((s) => !s.approved)
                   .map((sub) => (
-                    <div key={sub.id} className="bg-white rounded-3xl shadow-2xl flex flex-col lg:flex-row mb-8">
-                      <img src={sub.image_url} alt="Selfie" className="w-full lg:w-96 h-96 object-cover" />
+                    <div
+                      key={sub.id}
+                      className="bg-white rounded-3xl shadow-2xl flex flex-col lg:flex-row mb-8"
+                    >
+                      <img
+                        src={sub.image_url}
+                        alt="Selfie"
+                        className="w-full lg:w-96 h-96 object-cover"
+                      />
                       <div className="p-8 flex-1 flex flex-col justify-center">
-                        <p className="text-xl mb-2"><strong>User ID:</strong> {sub.user_id.slice(0, 8)}...</p>
-                        <p className="text-xl mb-2"><strong>Hunt:</strong> {sub.hunt_name}</p>
+                        <p className="text-xl mb-2">
+                          <strong>User ID:</strong> {sub.user_id.slice(0, 8)}...
+                        </p>
+                        <p className="text-xl mb-2">
+                          <strong>Hunt:</strong> {sub.hunt_name}
+                        </p>
                         <p className="text-sm text-gray-600 mb-8">
                           Submitted: {new Date(sub.created_at).toLocaleString()}
                         </p>
@@ -1013,7 +1033,10 @@ export default function App() {
                                 : "bg-green-600 hover:bg-green-700 text-white"
                             }`}
                           >
-                            <Check size={24} /> {processingSubmission === sub.id ? "Processing..." : "Approve"}
+                            <Check size={24} />{" "}
+                            {processingSubmission === sub.id
+                              ? "Processing..."
+                              : "Approve"}
                           </button>
                           <button
                             onClick={() => rejectSelfie(sub.id)}
@@ -1024,7 +1047,10 @@ export default function App() {
                                 : "bg-red-600 hover:bg-red-700 text-white"
                             }`}
                           >
-                            <X size={24} /> {processingSubmission === sub.id ? "Processing..." : "Reject"}
+                            <X size={24} />{" "}
+                            {processingSubmission === sub.id
+                              ? "Processing..."
+                              : "Reject"}
                           </button>
                         </div>
                       </div>
@@ -1037,15 +1063,30 @@ export default function App() {
           {/* CREATE HUNT */}
           {adminTab === "create" && (
             <div className="bg-white rounded-3xl shadow-2xl p-10 max-w-4xl mx-auto">
-              <h2 className="text-4xl font-black text-amber-900 mb-10 text-center">Create New Hunt</h2>
+              <h2 className="text-4xl font-black text-amber-900 mb-10 text-center">
+                Create New Hunt
+              </h2>
               <div className="grid md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Active From Date</label>
-                  <input type="date" value={newHuntDate} onChange={(e) => setNewHuntDate(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Active From Date
+                  </label>
+                  <input
+                    type="date"
+                    value={newHuntDate}
+                    onChange={(e) => setNewHuntDate(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Category</label>
-                  <select value={newHuntCategory} onChange={(e) => setNewHuntCategory(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl">
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Category
+                  </label>
+                  <select
+                    value={newHuntCategory}
+                    onChange={(e) => setNewHuntCategory(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                  >
                     <option value="">Select category</option>
                     <option>Café</option>
                     <option>Barber</option>
@@ -1056,36 +1097,98 @@ export default function App() {
                   </select>
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Business Name *</label>
-                  <input type="text" value={newHuntBusinessName} onChange={(e) => setNewHuntBusinessName(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. Brew Coffee House" />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Business Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={newHuntBusinessName}
+                    onChange={(e) => setNewHuntBusinessName(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                    placeholder="e.g. Brew Coffee House"
+                  />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Riddle / Clue *</label>
-                  <textarea value={newHuntRiddle} onChange={(e) => setNewHuntRiddle(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl h-32" placeholder="Write an intriguing riddle..." />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Riddle / Clue *
+                  </label>
+                  <textarea
+                    value={newHuntRiddle}
+                    onChange={(e) => setNewHuntRiddle(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl h-32"
+                    placeholder="Write an intriguing riddle..."
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Secret Code *</label>
-                  <input type="text" value={newHuntCode} onChange={(e) => setNewHuntCode(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. BREW2025" />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Secret Code *
+                  </label>
+                  <input
+                    type="text"
+                    value={newHuntCode}
+                    onChange={(e) => setNewHuntCode(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                    placeholder="e.g. BREW2025"
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Discount / Reward</label>
-                  <input type="text" value={newHuntDiscount} onChange={(e) => setNewHuntDiscount(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. Free coffee" />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Discount / Reward
+                  </label>
+                  <input
+                    type="text"
+                    value={newHuntDiscount}
+                    onChange={(e) => setNewHuntDiscount(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                    placeholder="e.g. Free coffee"
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Latitude *</label>
-                  <input type="text" value={newHuntLat} onChange={(e) => setNewHuntLat(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. 51.5074" />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Latitude *
+                  </label>
+                  <input
+                    type="text"
+                    value={newHuntLat}
+                    onChange={(e) => setNewHuntLat(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                    placeholder="e.g. 51.5074"
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Longitude *</label>
-                  <input type="text" value={newHuntLon} onChange={(e) => setNewHuntLon(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. -0.1278" />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Longitude *
+                  </label>
+                  <input
+                    type="text"
+                    value={newHuntLon}
+                    onChange={(e) => setNewHuntLon(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                    placeholder="e.g. -0.1278"
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Radius (meters)</label>
-                  <input type="number" value={newHuntRadius} onChange={(e) => setNewHuntRadius(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="50" />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Radius (meters)
+                  </label>
+                  <input
+                    type="number"
+                    value={newHuntRadius}
+                    onChange={(e) => setNewHuntRadius(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                    placeholder="50"
+                  />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Hunt Photo</label>
-                  <input type="file" accept="image/*" onChange={(e) => setNewHuntPhoto(e.target.files?.[0] || null)} className="w-full p-5 border-2 border-dashed border-amber-300 rounded-2xl bg-amber-50" />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Hunt Photo
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setNewHuntPhoto(e.target.files?.[0] || null)}
+                    className="w-full p-5 border-2 border-dashed border-amber-300 rounded-2xl bg-amber-50"
+                  />
                 </div>
               </div>
               <button
@@ -1118,12 +1221,25 @@ export default function App() {
               </div>
               <div className="grid md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Active From Date</label>
-                  <input type="date" value={newHuntDate} onChange={(e) => setNewHuntDate(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Active From Date
+                  </label>
+                  <input
+                    type="date"
+                    value={newHuntDate}
+                    onChange={(e) => setNewHuntDate(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Category</label>
-                  <select value={newHuntCategory} onChange={(e) => setNewHuntCategory(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl">
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Category
+                  </label>
+                  <select
+                    value={newHuntCategory}
+                    onChange={(e) => setNewHuntCategory(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                  >
                     <option value="">Select category</option>
                     <option>Café</option>
                     <option>Barber</option>
@@ -1134,42 +1250,110 @@ export default function App() {
                   </select>
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Business Name *</label>
-                  <input type="text" value={newHuntBusinessName} onChange={(e) => setNewHuntBusinessName(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. Brew Coffee House" />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Business Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={newHuntBusinessName}
+                    onChange={(e) => setNewHuntBusinessName(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                    placeholder="e.g. Brew Coffee House"
+                  />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Riddle / Clue *</label>
-                  <textarea value={newHuntRiddle} onChange={(e) => setNewHuntRiddle(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl h-32" placeholder="Write an intriguing riddle..." />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Riddle / Clue *
+                  </label>
+                  <textarea
+                    value={newHuntRiddle}
+                    onChange={(e) => setNewHuntRiddle(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl h-32"
+                    placeholder="Write an intriguing riddle..."
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Secret Code *</label>
-                  <input type="text" value={newHuntCode} onChange={(e) => setNewHuntCode(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. BREW2025" />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Secret Code *
+                  </label>
+                  <input
+                    type="text"
+                    value={newHuntCode}
+                    onChange={(e) => setNewHuntCode(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                    placeholder="e.g. BREW2025"
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Discount / Reward</label>
-                  <input type="text" value={newHuntDiscount} onChange={(e) => setNewHuntDiscount(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. Free coffee" />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Discount / Reward
+                  </label>
+                  <input
+                    type="text"
+                    value={newHuntDiscount}
+                    onChange={(e) => setNewHuntDiscount(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                    placeholder="e.g. Free coffee"
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Latitude *</label>
-                  <input type="text" value={newHuntLat} onChange={(e) => setNewHuntLat(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. 51.5074" />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Latitude *
+                  </label>
+                  <input
+                    type="text"
+                    value={newHuntLat}
+                    onChange={(e) => setNewHuntLat(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                    placeholder="e.g. 51.5074"
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Longitude *</label>
-                  <input type="text" value={newHuntLon} onChange={(e) => setNewHuntLon(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. -0.1278" />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Longitude *
+                  </label>
+                  <input
+                    type="text"
+                    value={newHuntLon}
+                    onChange={(e) => setNewHuntLon(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                    placeholder="e.g. -0.1278"
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Radius (meters)</label>
-                  <input type="number" value={newHuntRadius} onChange={(e) => setNewHuntRadius(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="50" />
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Radius (meters)
+                  </label>
+                  <input
+                    type="number"
+                    value={newHuntRadius}
+                    onChange={(e) => setNewHuntRadius(e.target.value)}
+                    className="w-full p-5 border-2 border-amber-200 rounded-2xl"
+                    placeholder="50"
+                  />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Hunt Photo (leave empty to keep current)</label>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Hunt Photo (leave empty to keep current)
+                  </label>
                   {editingHunt.photo && !newHuntPhoto && (
                     <div className="mb-4">
-                      <img src={getSafePhotoUrl(editingHunt.photo)} alt="Current" className="w-full h-48 object-cover rounded-xl" />
-                      <p className="text-sm text-gray-600 mt-2">Current photo (will be kept if you don't upload a new one)</p>
+                      <img
+                        src={getSafePhotoUrl(editingHunt.photo)}
+                        alt="Current"
+                        className="w-full h-48 object-cover rounded-xl"
+                      />
+                      <p className="text-sm text-gray-600 mt-2">
+                        Current photo (will be kept if you don't upload a new one)
+                      </p>
                     </div>
                   )}
-                  <input type="file" accept="image/*" onChange={(e) => setNewHuntPhoto(e.target.files?.[0] || null)} className="w-full p-5 border-2 border-dashed border-amber-300 rounded-2xl bg-amber-50" />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setNewHuntPhoto(e.target.files?.[0] || null)}
+                    className="w-full p-5 border-2 border-dashed border-amber-300 rounded-2xl bg-amber-50"
+                  />
                 </div>
               </div>
               <div className="flex gap-4 mt-10">
@@ -1198,7 +1382,7 @@ export default function App() {
     );
   }
 
-  // ─── INITIAL LOADING SCREEN ─────────────────────
+  // Initializing screen
   if (initializing) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50 flex items-center justify-center">
@@ -1210,13 +1394,15 @@ export default function App() {
     );
   }
 
-  // ─── LOGIN SCREEN ─────────────────────
+  // Login screen
   if (!session) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50 flex items-center justify-center px-6">
         <div className="bg-white rounded-3xl shadow-2xl p-12 max-w-md w-full text-center">
           <h1 className="text-6xl font-black text-amber-900 mb-4">Brew Hunt</h1>
-          <p className="text-xl text-amber-800 mb-12">Real-world treasure hunts in Hackney</p>
+          <p className="text-xl text-amber-800 mb-12">
+            Real-world treasure hunts in Hackney
+          </p>
 
           {authError && (
             <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-4 mb-6 flex items-start gap-3">
@@ -1225,12 +1411,33 @@ export default function App() {
             </div>
           )}
 
-          <input type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full p-5 mb-4 border-2 border-amber-200 rounded-2xl text-lg" />
-          <input type="password" placeholder="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyPress={(e) => e.key === "Enter" && signIn()} className="w-full p-5 mb-8 border-2 border-amber-200 rounded-2xl text-lg" />
-          <button onClick={signUp} disabled={loading} className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white py-6 rounded-2xl font-bold text-2xl shadow-lg mb-4">
+          <input
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full p-5 mb-4 border-2 border-amber-200 rounded-2xl text-lg"
+          />
+          <input
+            type="password"
+            placeholder="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyPress={(e) => e.key === "Enter" && signIn()}
+            className="w-full p-5 mb-8 border-2 border-amber-200 rounded-2xl text-lg"
+          />
+          <button
+            onClick={signUp}
+            disabled={loading}
+            className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white py-6 rounded-2xl font-bold text-2xl shadow-lg mb-4"
+          >
             {loading ? "Creating..." : "Sign Up Free"}
           </button>
-          <button onClick={signIn} disabled={loading} className="w-full bg-gray-700 hover:bg-gray-800 disabled:opacity-60 text-white py-6 rounded-2xl font-bold text-2xl shadow-lg">
+          <button
+            onClick={signIn}
+            disabled={loading}
+            className="w-full bg-gray-700 hover:bg-gray-800 disabled:opacity-60 text-white py-6 rounded-2xl font-bold text-2xl shadow-lg"
+          >
             {loading ? "Signing In..." : "Log In"}
           </button>
         </div>
@@ -1238,6 +1445,7 @@ export default function App() {
     );
   }
 
+  // Loading hunts screen (after login)
   if (!dataLoaded) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50 flex items-center justify-center">
@@ -1252,6 +1460,7 @@ export default function App() {
   const activeHuntsCount = hunts.filter((h) => !completed.includes(h.id)).length;
   const completedHunts = hunts.filter((h) => completed.includes(h.id));
 
+  // Main app
   return (
     <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50">
       {/* HEADER */}
@@ -1260,11 +1469,17 @@ export default function App() {
           <h1 className="text-4xl font-black text-amber-900">Brew Hunt</h1>
           <div className="flex items-center gap-4">
             {isAdmin && (
-              <button onClick={() => setShowAdmin(true)} className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-3 rounded-full font-bold flex items-center gap-2 shadow-lg">
+              <button
+                onClick={() => setShowAdmin(true)}
+                className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-3 rounded-full font-bold flex items-center gap-2 shadow-lg"
+              >
                 <Shield size={20} /> Admin
               </button>
             )}
-            <button onClick={signOut} className="text-gray-600 hover:text-gray-800 flex items-center gap-2">
+            <button
+              onClick={signOut}
+              className="text-gray-600 hover:text-gray-800 flex items-center gap-2"
+            >
               <LogOut size={20} /> Log Out
             </button>
           </div>
@@ -1278,7 +1493,10 @@ export default function App() {
             <AlertCircle className="text-red-600 flex-shrink-0 mt-1" size={20} />
             <div className="flex-1">
               <p className="text-red-700">{error}</p>
-              <button onClick={() => setError("")} className="text-red-800 underline text-sm mt-1 font-bold">
+              <button
+                onClick={() => setError("")}
+                className="text-red-800 underline text-sm mt-1 font-bold"
+              >
                 Dismiss
               </button>
             </div>
@@ -1345,7 +1563,10 @@ export default function App() {
             </div>
           ) : (
             filteredHunts.map((hunt) => (
-              <div key={hunt.id} className="bg-white rounded-3xl shadow-2xl overflow-hidden hover:shadow-3xl transition">
+              <div
+                key={hunt.id}
+                className="bg-white rounded-3xl shadow-2xl overflow-hidden hover:shadow-3xl transition"
+              >
                 <div className="relative">
                   <img
                     src={getSafePhotoUrl(hunt.photo)}
@@ -1358,9 +1579,13 @@ export default function App() {
                     {hunt.category}
                   </span>
                   <p className="text-2xl font-bold mb-4 text-gray-800">{hunt.riddle}</p>
-                  <p className="text-xl font-medium text-gray-700 mb-2">{hunt.business_name}</p>
+                  <p className="text-xl font-medium text-gray-700 mb-2">
+                    {hunt.business_name}
+                  </p>
                   {hunt.discount && (
-                    <p className="text-lg text-green-600 font-semibold mb-8">Gift: {hunt.discount}</p>
+                    <p className="text-lg text-green-600 font-semibold mb-8">
+                      Gift: {hunt.discount}
+                    </p>
                   )}
                   <button
                     onClick={() => {
@@ -1393,20 +1618,29 @@ export default function App() {
               Your Completed Hunts ({totalHunts})
             </h2>
             {completedHunts.length === 0 ? (
-              <p className="text-gray-600 text-xl">No completed hunts yet — get hunting!</p>
+              <p className="text-gray-600 text-xl">
+                No completed hunts yet — get hunting!
+              </p>
             ) : (
               <div className="space-y-8">
                 {completedHunts.map((hunt) => (
-                  <div key={hunt.id} className="bg-gray-50 rounded-2xl p-6 text-left">
+                  <div
+                    key={hunt.id}
+                    className="bg-gray-50 rounded-2xl p-6 text-left"
+                  >
                     <img
                       src={getSafePhotoUrl(hunt.photo)}
                       alt="Hunt"
                       className="w-full h-48 object-cover rounded-xl mb-4"
                     />
-                    <p className="text-xl font-bold text-gray-800 mb-2">{hunt.riddle}</p>
+                    <p className="text-xl font-bold text-gray-800 mb-2">
+                      {hunt.riddle}
+                    </p>
                     <p className="text-lg text-gray-700 mb-2">{hunt.business_name}</p>
                     <div className="bg-green-100 rounded-xl p-4 mt-4">
-                      <p className="text-sm text-green-800 font-semibold mb-1">Your code:</p>
+                      <p className="text-sm text-green-800 font-semibold mb-1">
+                        Your code:
+                      </p>
                       <p className="text-green-600 font-black text-2xl">{hunt.code}</p>
                     </div>
                   </div>
@@ -1431,9 +1665,15 @@ export default function App() {
             >
               ×
             </button>
-            <h3 className="text-4xl font-black text-gray-800 mb-4">Show the logo!</h3>
-            <p className="text-xl text-gray-600 mb-2">Take a selfie with the business logo</p>
-            <p className="text-lg text-amber-600 font-bold mb-10">Win £50 weekly for best selfie!</p>
+            <h3 className="text-4xl font-black text-gray-800 mb-4">
+              Show the logo!
+            </h3>
+            <p className="text-xl text-gray-600 mb-2">
+              Take a selfie with the business logo
+            </p>
+            <p className="text-lg text-amber-600 font-bold mb-10">
+              Win £50 weekly for best selfie!
+            </p>
 
             {selfieFile && (
               <div className="mb-6 p-4 bg-green-50 rounded-2xl">
@@ -1463,7 +1703,9 @@ export default function App() {
             >
               {uploading ? "Uploading..." : "Submit & Unlock Code"}
             </button>
-            <p className="text-sm text-gray-500 mt-4">Location will be verified automatically</p>
+            <p className="text-sm text-gray-500 mt-4">
+              Location will be verified automatically
+            </p>
           </div>
         </div>
       )}
@@ -1479,7 +1721,9 @@ export default function App() {
               ×
             </button>
             <Trophy className="w-16 h-16 text-amber-600 mx-auto mb-6" />
-            <h2 className="text-4xl font-black text-amber-900 mb-10">Hackney Top Hunters</h2>
+            <h2 className="text-4xl font-black text-amber-900 mb-10">
+              Hackney Top Hunters
+            </h2>
 
             {loadingLeaderboard ? (
               <div className="py-12">
@@ -1504,14 +1748,20 @@ export default function App() {
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-4">
-                        <span className="text-3xl font-black text-gray-700">#{idx + 1}</span>
+                        <span className="text-3xl font-black text-gray-700">
+                          #{idx + 1}
+                        </span>
                         <div>
-                          <p className="font-bold text-xl text-gray-800">{user.displayName}</p>
+                          <p className="font-bold text-xl text-gray-800">
+                            {user.displayName}
+                          </p>
                           <p className="text-sm text-gray-600">{user.tier}</p>
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-2xl font-black text-amber-600">{user.hunts}</p>
+                        <p className="text-2xl font-black text-amber-600">
+                          {user.hunts}
+                        </p>
                         <p className="text-sm text-gray-600">hunts</p>
                       </div>
                     </div>
