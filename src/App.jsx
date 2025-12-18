@@ -413,10 +413,33 @@ export default function App() {
 
   // ─── INITIAL LOAD ─────────────────────
   useEffect(() => {
-    console.log("Initial load effect:", { session: !!session, initializing, showAdmin, isAdmin });
+    console.log("Initial load effect:", { 
+      session,
+      sessionType: typeof session,
+      sessionNull: session === null,
+      sessionUndefined: session === undefined,
+      hasTruthySession: !!session,
+      initializing, 
+      showAdmin, 
+      isAdmin,
+      dataLoaded 
+    });
     
-    if (!session || initializing) {
-      console.log("Initial load: Skipping - no session or still initializing");
+    // Don't load if still initializing
+    if (initializing) {
+      console.log("Initial load: Skipping - still initializing");
+      return;
+    }
+    
+    // Don't load if no session - use explicit null/undefined check
+    if (session === null || session === undefined || !session) {
+      console.log("Initial load: Skipping - no session (null/undefined/falsy)");
+      return;
+    }
+    
+    // Don't reload if data is already loaded
+    if (dataLoaded && !showAdmin) {
+      console.log("Initial load: Skipping - data already loaded");
       return;
     }
     
@@ -427,7 +450,7 @@ export default function App() {
       console.log("Initial load: Loading progress and hunts");
       loadProgressAndHunts();
     }
-  }, [session, showAdmin, isAdmin, initializing, loadAdminData, loadProgressAndHunts]);
+  }, [session, showAdmin, isAdmin, initializing, dataLoaded, loadAdminData, loadProgressAndHunts]);
 
   // ─── FILTER APPLICATION ─────────────────────
   useEffect(() => {
