@@ -63,6 +63,7 @@ function getYesterdayLocalDate() {
 
 export default function App() {
   const [session, setSession] = useState(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
@@ -113,15 +114,21 @@ export default function App() {
 
   // ─── AUTH & PROFILE AUTO-CREATE ─────────────────────
   useEffect(() => {
+    console.log("Checking initial session...");
     supabase.auth.getSession().then(({ data }) => {
+      console.log("Initial session:", data.session ? "exists" : "null");
       setSession(data.session);
+      setSessionLoading(false);
       if (data.session?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
         setIsAdmin(true);
       }
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      console.log("Auth state changed:", _event, session ? "session exists" : "no session");
       setSession(session);
+      setSessionLoading(false);
+      
       if (session?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
         setIsAdmin(true);
       } else {
@@ -151,11 +158,15 @@ export default function App() {
 
   // ─── LOAD DATA ─────────────────────
   const loadProgressAndHunts = useCallback(async () => {
-    if (!session) return;
+    if (!session?.user?.id) {
+      console.log("No session, skipping load");
+      return;
+    }
 
+    console.log("Loading progress and hunts for user:", session.user.id);
+    
     try {
       setError("");
-      console.log("Loading progress and hunts...");
 
       const { data: progressRows, error: progressError } = await supabase
         .from("user_progress")
@@ -222,21 +233,36 @@ export default function App() {
       setFilteredHunts(filtered);
       
       setDataLoaded(true);
-      console.log("Data loaded successfully");
+      console.log("Data loaded successfully - hunts:", huntsData?.length, "completed:", completedIds.length);
     } catch (e) {
       console.error("Load error:", e);
       setError("Failed to load hunts. Please refresh.");
       setDataLoaded(true);
     }
-  }, [session, activeFilter]);
+  }, [session?.user?.id, activeFilter]);
 
-  // Separate effect for initial load
+  // Initial load - ONLY when session is confirmed to exist
   useEffect(() => {
-    if (!session || showAdmin) return;
+    if (sessionLoading) {
+      console.log("Still loading session, waiting...");
+      return;
+    }
     
+    if (!session) {
+      console.log("No session found, showing login");
+      setDataLoaded(false);
+      return;
+    }
+    
+    if (showAdmin) {
+      console.log("Admin mode, skipping user data load");
+      return;
+    }
+
+    console.log("Session confirmed, loading data...");
     setDataLoaded(false);
     loadProgressAndHunts();
-  }, [session, showAdmin]);
+  }, [session, showAdmin, sessionLoading]);
 
   // Separate effect for filter changes
   useEffect(() => {
@@ -726,38 +752,38 @@ export default function App() {
   if (showAdmin) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-50">
-        <div className="bg-white shadow-xl p-6 sticky top-0 z-50 flex justify-between items-center">
-          <h1 className="text-4xl font-black text-amber-900 flex items-center gap-4">
-            <Shield className="w-12 h-12" />
+        <div className="bg-white shadow-xl p-4 md:p-6 sticky top-0 z-50 flex justify-between items-center">
+          <h1 className="text-2xl md:text-4xl font-black text-amber-900 flex items-center gap-2 md:gap-4">
+            <Shield className="w-8 h-8 md:w-12 md:h-12" />
             Admin Panel
           </h1>
-          <div className="flex gap-4">
-            <button onClick={() => setShowAdmin(false)} className="px-6 py-3 bg-gray-200 hover:bg-gray-300 rounded-full font-bold">
-              Back to App
+          <div className="flex gap-2 md:gap-4">
+            <button onClick={() => setShowAdmin(false)} className="px-4 md:px-6 py-2 md:py-3 bg-gray-200 hover:bg-gray-300 rounded-full font-bold text-sm md:text-base">
+              Back
             </button>
             <button onClick={signOut} className="text-gray-600 hover:text-gray-800 flex items-center gap-2">
-              <LogOut size={20} /> Log Out
+              <LogOut size={20} />
             </button>
           </div>
         </div>
 
-        <div className="max-w-7xl mx-auto p-8">
-          <div className="flex gap-8 mb-12 border-b-4 border-amber-200">
+        <div className="max-w-7xl mx-auto p-4 md:p-8">
+          <div className="flex gap-4 md:gap-8 mb-8 md:mb-12 border-b-4 border-amber-200 overflow-x-auto">
             <button
               onClick={() => setAdminTab("hunts")}
-              className={`pb-4 px-6 text-2xl font-bold ${adminTab === "hunts" ? "text-amber-600 border-b-4 border-amber-600" : "text-gray-600"}`}
+              className={`pb-4 px-4 md:px-6 text-lg md:text-2xl font-bold whitespace-nowrap ${adminTab === "hunts" ? "text-amber-600 border-b-4 border-amber-600" : "text-gray-600"}`}
             >
               All Hunts ({adminHunts.length})
             </button>
             <button
               onClick={() => setAdminTab("selfies")}
-              className={`pb-4 px-6 text-2xl font-bold ${adminTab === "selfies" ? "text-amber-600 border-b-4 border-amber-600" : "text-gray-600"}`}
+              className={`pb-4 px-4 md:px-6 text-lg md:text-2xl font-bold whitespace-nowrap ${adminTab === "selfies" ? "text-amber-600 border-b-4 border-amber-600" : "text-gray-600"}`}
             >
               Pending ({selfies.filter((s) => !s.approved).length})
             </button>
             <button
               onClick={() => setAdminTab("create")}
-              className={`pb-4 px-6 text-2xl font-bold ${adminTab === "create" ? "text-amber-600 border-b-4 border-amber-600" : "text-gray-600"}`}
+              className={`pb-4 px-4 md:px-6 text-lg md:text-2xl font-bold whitespace-nowrap ${adminTab === "create" ? "text-amber-600 border-b-4 border-amber-600" : "text-gray-600"}`}
             >
               + Create Hunt
             </button>
@@ -765,29 +791,29 @@ export default function App() {
 
           {/* ALL HUNTS */}
           {adminTab === "hunts" && (
-            <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 md:gap-8 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
               {adminHunts.map((hunt) => (
                 <div key={hunt.id} className="bg-white rounded-3xl shadow-2xl overflow-hidden">
-                  <img src={getSafePhotoUrl(hunt.photo)} alt={hunt.business_name} className="w-full h-64 object-cover" />
-                  <div className="p-6">
-                    <span className="inline-block px-4 py-1 bg-amber-200 text-amber-800 rounded-full text-xs font-bold mb-3">
+                  <img src={getSafePhotoUrl(hunt.photo)} alt={hunt.business_name} className="w-full h-48 md:h-64 object-cover" />
+                  <div className="p-4 md:p-6">
+                    <span className="inline-block px-3 md:px-4 py-1 bg-amber-200 text-amber-800 rounded-full text-xs font-bold mb-3">
                       {hunt.category}
                     </span>
-                    <h3 className="text-2xl font-black text-amber-900 mb-2">{hunt.business_name}</h3>
-                    <p className="text-gray-600 italic mb-4">"{hunt.riddle}"</p>
-                    <p className="text-sm"><strong>Code:</strong> {hunt.code}</p>
-                    <p className="text-sm"><strong>Date:</strong> {new Date(hunt.date).toLocaleDateString()}</p>
-                    <p className="text-sm mb-4"><strong>Radius:</strong> {hunt.radius}m</p>
-                    <div className="flex gap-3">
+                    <h3 className="text-xl md:text-2xl font-black text-amber-900 mb-2">{hunt.business_name}</h3>
+                    <p className="text-sm md:text-base text-gray-600 italic mb-4">"{hunt.riddle}"</p>
+                    <p className="text-xs md:text-sm"><strong>Code:</strong> {hunt.code}</p>
+                    <p className="text-xs md:text-sm"><strong>Date:</strong> {new Date(hunt.date).toLocaleDateString()}</p>
+                    <p className="text-xs md:text-sm mb-4"><strong>Radius:</strong> {hunt.radius}m</p>
+                    <div className="flex gap-2 md:gap-3">
                       <button
                         onClick={() => startEditHunt(hunt)}
-                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold transition"
+                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 md:py-3 rounded-xl font-bold text-sm md:text-base transition"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => deleteHunt(hunt.id)}
-                        className="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl font-bold transition"
+                        className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 md:py-3 rounded-xl font-bold text-sm md:text-base transition"
                       >
                         Delete
                       </button>
@@ -802,41 +828,41 @@ export default function App() {
           {adminTab === "selfies" && (
             <>
               {selfies.filter((s) => !s.approved).length === 0 ? (
-                <p className="text-center text-gray-600 text-xl py-12">No pending selfies</p>
+                <p className="text-center text-gray-600 text-lg md:text-xl py-12">No pending selfies</p>
               ) : (
                 selfies
                   .filter((s) => !s.approved)
                   .map((sub) => (
-                    <div key={sub.id} className="bg-white rounded-3xl shadow-2xl flex flex-col lg:flex-row mb-8">
-                      <img src={sub.image_url} alt="Selfie" className="w-full lg:w-96 h-96 object-cover" />
-                      <div className="p-8 flex-1 flex flex-col justify-center">
-                        <p className="text-xl mb-2"><strong>User ID:</strong> {sub.user_id.slice(0, 8)}...</p>
-                        <p className="text-xl mb-2"><strong>Hunt:</strong> {sub.hunt_name}</p>
-                        <p className="text-sm text-gray-600 mb-8">
+                    <div key={sub.id} className="bg-white rounded-3xl shadow-2xl flex flex-col lg:flex-row mb-6 md:mb-8">
+                      <img src={sub.image_url} alt="Selfie" className="w-full lg:w-96 h-64 md:h-96 object-cover" />
+                      <div className="p-6 md:p-8 flex-1 flex flex-col justify-center">
+                        <p className="text-lg md:text-xl mb-2"><strong>User ID:</strong> {sub.user_id.slice(0, 8)}...</p>
+                        <p className="text-lg md:text-xl mb-2"><strong>Hunt:</strong> {sub.hunt_name}</p>
+                        <p className="text-xs md:text-sm text-gray-600 mb-6 md:mb-8">
                           Submitted: {new Date(sub.created_at).toLocaleString()}
                         </p>
-                        <div className="flex gap-6">
+                        <div className="flex gap-4 md:gap-6">
                           <button
                             onClick={() => approveSelfie(sub.id)}
                             disabled={processingSubmission === sub.id}
-                            className={`flex-1 py-5 rounded-2xl font-bold text-xl flex items-center justify-center gap-3 transition ${
+                            className={`flex-1 py-4 md:py-5 rounded-2xl font-bold text-lg md:text-xl flex items-center justify-center gap-2 md:gap-3 transition ${
                               processingSubmission === sub.id
                                 ? "bg-gray-400 text-gray-700 cursor-not-allowed"
                                 : "bg-green-600 hover:bg-green-700 text-white"
                             }`}
                           >
-                            <Check size={24} /> {processingSubmission === sub.id ? "Processing..." : "Approve"}
+                            <Check size={20} /> {processingSubmission === sub.id ? "..." : "Approve"}
                           </button>
                           <button
                             onClick={() => rejectSelfie(sub.id)}
                             disabled={processingSubmission === sub.id}
-                            className={`flex-1 py-5 rounded-2xl font-bold text-xl flex items-center justify-center gap-3 transition ${
+                            className={`flex-1 py-4 md:py-5 rounded-2xl font-bold text-lg md:text-xl flex items-center justify-center gap-2 md:gap-3 transition ${
                               processingSubmission === sub.id
                                 ? "bg-gray-400 text-gray-700 cursor-not-allowed"
                                 : "bg-red-600 hover:bg-red-700 text-white"
                             }`}
                           >
-                            <X size={24} /> {processingSubmission === sub.id ? "Processing..." : "Reject"}
+                            <X size={20} /> {processingSubmission === sub.id ? "..." : "Reject"}
                           </button>
                         </div>
                       </div>
@@ -846,18 +872,18 @@ export default function App() {
             </>
           )}
 
-          {/* CREATE HUNT */}
+          {/* CREATE HUNT - keeping original size as it's admin only */}
           {adminTab === "create" && (
-            <div className="bg-white rounded-3xl shadow-2xl p-10 max-w-4xl mx-auto">
-              <h2 className="text-4xl font-black text-amber-900 mb-10 text-center">Create New Hunt</h2>
-              <div className="grid md:grid-cols-2 gap-6">
+            <div className="bg-white rounded-3xl shadow-2xl p-6 md:p-10 max-w-4xl mx-auto">
+              <h2 className="text-3xl md:text-4xl font-black text-amber-900 mb-8 md:mb-10 text-center">Create New Hunt</h2>
+              <div className="grid md:grid-cols-2 gap-4 md:gap-6">
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">Active From Date</label>
-                  <input type="date" value={newHuntDate} onChange={(e) => setNewHuntDate(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" />
+                  <input type="date" value={newHuntDate} onChange={(e) => setNewHuntDate(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">Category</label>
-                  <select value={newHuntCategory} onChange={(e) => setNewHuntCategory(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl">
+                  <select value={newHuntCategory} onChange={(e) => setNewHuntCategory(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl">
                     <option value="">Select category</option>
                     <option>Café</option>
                     <option>Barber</option>
@@ -869,72 +895,72 @@ export default function App() {
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-sm font-bold text-gray-700 mb-2">Business Name *</label>
-                  <input type="text" value={newHuntBusinessName} onChange={(e) => setNewHuntBusinessName(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. Brew Coffee House" />
+                  <input type="text" value={newHuntBusinessName} onChange={(e) => setNewHuntBusinessName(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. Brew Coffee House" />
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-sm font-bold text-gray-700 mb-2">Riddle / Clue *</label>
-                  <textarea value={newHuntRiddle} onChange={(e) => setNewHuntRiddle(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl h-32" placeholder="Write an intriguing riddle..." />
+                  <textarea value={newHuntRiddle} onChange={(e) => setNewHuntRiddle(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl h-24 md:h-32" placeholder="Write an intriguing riddle..." />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">Secret Code *</label>
-                  <input type="text" value={newHuntCode} onChange={(e) => setNewHuntCode(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. BREW2025" />
+                  <input type="text" value={newHuntCode} onChange={(e) => setNewHuntCode(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. BREW2025" />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">Discount / Reward</label>
-                  <input type="text" value={newHuntDiscount} onChange={(e) => setNewHuntDiscount(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. Free coffee" />
+                  <input type="text" value={newHuntDiscount} onChange={(e) => setNewHuntDiscount(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. Free coffee" />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">Latitude *</label>
-                  <input type="text" value={newHuntLat} onChange={(e) => setNewHuntLat(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. 51.5074" />
+                  <input type="text" value={newHuntLat} onChange={(e) => setNewHuntLat(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. 51.5074" />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">Longitude *</label>
-                  <input type="text" value={newHuntLon} onChange={(e) => setNewHuntLon(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. -0.1278" />
+                  <input type="text" value={newHuntLon} onChange={(e) => setNewHuntLon(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. -0.1278" />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">Radius (meters)</label>
-                  <input type="number" value={newHuntRadius} onChange={(e) => setNewHuntRadius(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="50" />
+                  <input type="number" value={newHuntRadius} onChange={(e) => setNewHuntRadius(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" placeholder="50" />
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-sm font-bold text-gray-700 mb-2">Hunt Photo</label>
-                  <input type="file" accept="image/*" onChange={(e) => setNewHuntPhoto(e.target.files?.[0] || null)} className="w-full p-5 border-2 border-dashed border-amber-300 rounded-2xl bg-amber-50" />
+                  <input type="file" accept="image/*" onChange={(e) => setNewHuntPhoto(e.target.files?.[0] || null)} className="w-full p-4 md:p-5 border-2 border-dashed border-amber-300 rounded-2xl bg-amber-50 text-sm" />
                 </div>
               </div>
               <button
                 onClick={createHunt}
                 disabled={creatingHunt}
-                className="mt-10 w-full bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white py-6 rounded-2xl font-black text-2xl transition"
+                className="mt-8 md:mt-10 w-full bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white py-5 md:py-6 rounded-2xl font-black text-xl md:text-2xl transition"
               >
                 {creatingHunt ? "Creating..." : "Create Hunt"}
               </button>
             </div>
           )}
 
-          {/* EDIT HUNT MODAL */}
+          {/* EDIT HUNT MODAL - keeping full size modals */}
           {showEditModal && editingHunt && (
-            <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-6 overflow-y-auto">
-              <div className="bg-white rounded-3xl shadow-2xl p-10 max-w-4xl w-full my-8">
-                <div className="flex justify-between items-center mb-8">
-                  <h2 className="text-4xl font-black text-amber-900">Edit Hunt</h2>
+            <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4 md:p-6 overflow-y-auto">
+              <div className="bg-white rounded-3xl shadow-2xl p-6 md:p-10 max-w-4xl w-full my-8">
+                <div className="flex justify-between items-center mb-6 md:mb-8">
+                  <h2 className="text-2xl md:text-4xl font-black text-amber-900">Edit Hunt</h2>
                   <button
                     onClick={() => {
                       setShowEditModal(false);
                       setEditingHunt(null);
                       setNewHuntPhoto(null);
                     }}
-                    className="text-4xl text-gray-500 hover:text-gray-700"
+                    className="text-3xl md:text-4xl text-gray-500 hover:text-gray-700"
                   >
                     ×
                   </button>
                 </div>
-                <div className="grid md:grid-cols-2 gap-6">
+                <div className="grid md:grid-cols-2 gap-4 md:gap-6">
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Active From Date</label>
-                    <input type="date" value={newHuntDate} onChange={(e) => setNewHuntDate(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" />
+                    <input type="date" value={newHuntDate} onChange={(e) => setNewHuntDate(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Category</label>
-                    <select value={newHuntCategory} onChange={(e) => setNewHuntCategory(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl">
+                    <select value={newHuntCategory} onChange={(e) => setNewHuntCategory(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl">
                       <option value="">Select category</option>
                       <option>Café</option>
                       <option>Barber</option>
@@ -946,58 +972,58 @@ export default function App() {
                   </div>
                   <div className="md:col-span-2">
                     <label className="block text-sm font-bold text-gray-700 mb-2">Business Name *</label>
-                    <input type="text" value={newHuntBusinessName} onChange={(e) => setNewHuntBusinessName(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. Brew Coffee House" />
+                    <input type="text" value={newHuntBusinessName} onChange={(e) => setNewHuntBusinessName(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. Brew Coffee House" />
                   </div>
                   <div className="md:col-span-2">
                     <label className="block text-sm font-bold text-gray-700 mb-2">Riddle / Clue *</label>
-                    <textarea value={newHuntRiddle} onChange={(e) => setNewHuntRiddle(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl h-32" placeholder="Write an intriguing riddle..." />
+                    <textarea value={newHuntRiddle} onChange={(e) => setNewHuntRiddle(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl h-24 md:h-32" placeholder="Write an intriguing riddle..." />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Secret Code *</label>
-                    <input type="text" value={newHuntCode} onChange={(e) => setNewHuntCode(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. BREW2025" />
+                    <input type="text" value={newHuntCode} onChange={(e) => setNewHuntCode(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. BREW2025" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Discount / Reward</label>
-                    <input type="text" value={newHuntDiscount} onChange={(e) => setNewHuntDiscount(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. Free coffee" />
+                    <input type="text" value={newHuntDiscount} onChange={(e) => setNewHuntDiscount(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. Free coffee" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Latitude *</label>
-                    <input type="text" value={newHuntLat} onChange={(e) => setNewHuntLat(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. 51.5074" />
+                    <input type="text" value={newHuntLat} onChange={(e) => setNewHuntLat(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. 51.5074" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Longitude *</label>
-                    <input type="text" value={newHuntLon} onChange={(e) => setNewHuntLon(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. -0.1278" />
+                    <input type="text" value={newHuntLon} onChange={(e) => setNewHuntLon(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" placeholder="e.g. -0.1278" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Radius (meters)</label>
-                    <input type="number" value={newHuntRadius} onChange={(e) => setNewHuntRadius(e.target.value)} className="w-full p-5 border-2 border-amber-200 rounded-2xl" placeholder="50" />
+                    <input type="number" value={newHuntRadius} onChange={(e) => setNewHuntRadius(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" placeholder="50" />
                   </div>
                   <div className="md:col-span-2">
                     <label className="block text-sm font-bold text-gray-700 mb-2">Hunt Photo (leave empty to keep current)</label>
                     {editingHunt.photo && !newHuntPhoto && (
                       <div className="mb-4">
-                        <img src={getSafePhotoUrl(editingHunt.photo)} alt="Current" className="w-full h-48 object-cover rounded-xl" />
-                        <p className="text-sm text-gray-600 mt-2">Current photo (will be kept if you don't upload a new one)</p>
+                        <img src={getSafePhotoUrl(editingHunt.photo)} alt="Current" className="w-full h-32 md:h-48 object-cover rounded-xl" />
+                        <p className="text-xs md:text-sm text-gray-600 mt-2">Current photo (will be kept if you don't upload a new one)</p>
                       </div>
                     )}
-                    <input type="file" accept="image/*" onChange={(e) => setNewHuntPhoto(e.target.files?.[0] || null)} className="w-full p-5 border-2 border-dashed border-amber-300 rounded-2xl bg-amber-50" />
+                    <input type="file" accept="image/*" onChange={(e) => setNewHuntPhoto(e.target.files?.[0] || null)} className="w-full p-4 md:p-5 border-2 border-dashed border-amber-300 rounded-2xl bg-amber-50 text-sm" />
                   </div>
                 </div>
-                <div className="flex gap-4 mt-10">
+                <div className="flex gap-3 md:gap-4 mt-8 md:mt-10">
                   <button
                     onClick={() => {
                       setShowEditModal(false);
                       setEditingHunt(null);
                       setNewHuntPhoto(null);
                     }}
-                    className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 py-6 rounded-2xl font-black text-2xl transition"
+                    className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 py-4 md:py-6 rounded-2xl font-black text-lg md:text-2xl transition"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={updateHunt}
                     disabled={creatingHunt}
-                    className="flex-1 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white py-6 rounded-2xl font-black text-2xl transition"
+                    className="flex-1 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white py-4 md:py-6 rounded-2xl font-black text-lg md:text-2xl transition"
                   >
                     {creatingHunt ? "Updating..." : "Update Hunt"}
                   </button>
@@ -1013,24 +1039,24 @@ export default function App() {
   // ─── LOGIN SCREEN ─────────────────────
   if (!session) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50 flex items-center justify-center px-6">
-        <div className="bg-white rounded-3xl shadow-2xl p-12 max-w-md w-full text-center">
-          <h1 className="text-6xl font-black text-amber-900 mb-4">Brew Hunt</h1>
-          <p className="text-xl text-amber-800 mb-12">Real-world treasure hunts in Hackney</p>
+      <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50 flex items-center justify-center px-4 md:px-6">
+        <div className="bg-white rounded-3xl shadow-2xl p-8 md:p-12 max-w-md w-full text-center">
+          <h1 className="text-4xl md:text-6xl font-black text-amber-900 mb-3 md:mb-4">Brew Hunt</h1>
+          <p className="text-lg md:text-xl text-amber-800 mb-8 md:mb-12">Real-world treasure hunts in Hackney</p>
 
           {authError && (
-            <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-4 mb-6 flex items-start gap-3">
-              <AlertCircle className="text-red-600 flex-shrink-0 mt-1" size={20} />
-              <p className="text-red-700 text-left">{authError}</p>
+            <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-3 md:p-4 mb-4 md:mb-6 flex items-start gap-2 md:gap-3">
+              <AlertCircle className="text-red-600 flex-shrink-0 mt-1" size={18} />
+              <p className="text-sm md:text-base text-red-700 text-left">{authError}</p>
             </div>
           )}
 
-          <input type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full p-5 mb-4 border-2 border-amber-200 rounded-2xl text-lg" />
-          <input type="password" placeholder="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyPress={(e) => e.key === "Enter" && signIn()} className="w-full p-5 mb-8 border-2 border-amber-200 rounded-2xl text-lg" />
-          <button onClick={signUp} disabled={loading} className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white py-6 rounded-2xl font-bold text-2xl shadow-lg mb-4">
+          <input type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full p-4 md:p-5 mb-3 md:mb-4 border-2 border-amber-200 rounded-2xl text-base md:text-lg" />
+          <input type="password" placeholder="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyPress={(e) => e.key === "Enter" && signIn()} className="w-full p-4 md:p-5 mb-6 md:mb-8 border-2 border-amber-200 rounded-2xl text-base md:text-lg" />
+          <button onClick={signUp} disabled={loading} className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white py-4 md:py-6 rounded-2xl font-bold text-lg md:text-2xl shadow-lg mb-3 md:mb-4">
             {loading ? "Creating..." : "Sign Up Free"}
           </button>
-          <button onClick={signIn} disabled={loading} className="w-full bg-gray-700 hover:bg-gray-800 disabled:opacity-60 text-white py-6 rounded-2xl font-bold text-2xl shadow-lg">
+          <button onClick={signIn} disabled={loading} className="w-full bg-gray-700 hover:bg-gray-800 disabled:opacity-60 text-white py-4 md:py-6 rounded-2xl font-bold text-lg md:text-2xl shadow-lg">
             {loading ? "Signing In..." : "Log In"}
           </button>
         </div>
@@ -1040,10 +1066,10 @@ export default function App() {
 
   if (!dataLoaded) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50 flex items-center justify-center px-4">
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-16 w-16 border-b-4 border-amber-600 mb-6"></div>
-          <p className="text-2xl text-amber-900 font-bold">Loading your hunts...</p>
+          <div className="inline-block animate-spin rounded-full h-12 w-12 md:h-16 md:w-16 border-b-4 border-amber-600 mb-4 md:mb-6"></div>
+          <p className="text-xl md:text-2xl text-amber-900 font-bold">Loading your hunts...</p>
         </div>
       </div>
     );
@@ -1055,24 +1081,24 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50">
       {/* HEADER */}
-      <div className="bg-white/80 backdrop-blur-lg shadow-lg p-6 sticky top-0 z-40">
-        <div className="max-w-6xl mx-auto flex justify-between items-center">
-          <h1 className="text-4xl font-black text-amber-900">Brew Hunt</h1>
-          <div className="flex items-center gap-4">
+      <div className="bg-white/80 backdrop-blur-lg shadow-lg p-4 md:p-6 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          <h1 className="text-2xl md:text-4xl font-black text-amber-900">Brew Hunt</h1>
+          <div className="flex items-center gap-2 md:gap-4">
             {isAdmin && (
-              <button onClick={() => setShowAdmin(true)} className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-3 rounded-full font-bold flex items-center gap-2 shadow-lg">
-                <Shield size={20} /> Admin
+              <button onClick={() => setShowAdmin(true)} className="bg-amber-600 hover:bg-amber-700 text-white px-3 md:px-6 py-2 md:py-3 rounded-full font-bold flex items-center gap-1 md:gap-2 shadow-lg text-sm md:text-base">
+                <Shield size={16} className="md:w-5 md:h-5" /> Admin
               </button>
             )}
             <button 
               onClick={() => setShowProfileModal(true)}
-              className="bg-purple-600 hover:bg-purple-700 text-white p-3 rounded-full shadow-lg"
+              className="bg-purple-600 hover:bg-purple-700 text-white p-2 md:p-3 rounded-full shadow-lg"
               title="View Profile"
             >
-              <User size={24} />
+              <User size={20} className="md:w-6 md:h-6" />
             </button>
-            <button onClick={signOut} className="text-gray-600 hover:text-gray-800 flex items-center gap-2">
-              <LogOut size={20} /> Log Out
+            <button onClick={signOut} className="text-gray-600 hover:text-gray-800 flex items-center gap-1 md:gap-2">
+              <LogOut size={18} className="md:w-5 md:h-5" />
             </button>
           </div>
         </div>
@@ -1080,12 +1106,12 @@ export default function App() {
 
       {/* ERROR BANNER */}
       {error && (
-        <div className="max-w-6xl mx-auto px-6 pt-6">
-          <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-4 flex items-start gap-3">
-            <AlertCircle className="text-red-600 flex-shrink-0 mt-1" size={20} />
+        <div className="max-w-7xl mx-auto px-4 md:px-6 pt-4 md:pt-6">
+          <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-3 md:p-4 flex items-start gap-2 md:gap-3">
+            <AlertCircle className="text-red-600 flex-shrink-0 mt-1" size={18} />
             <div className="flex-1">
-              <p className="text-red-700">{error}</p>
-              <button onClick={() => setError("")} className="text-red-800 underline text-sm mt-1 font-bold">
+              <p className="text-sm md:text-base text-red-700">{error}</p>
+              <button onClick={() => setError("")} className="text-red-800 underline text-xs md:text-sm mt-1 font-bold">
                 Dismiss
               </button>
             </div>
@@ -1094,13 +1120,13 @@ export default function App() {
       )}
 
       {/* FILTERS */}
-      <div className="max-w-6xl mx-auto px-6 pt-6">
-        <div className="flex flex-wrap gap-3 justify-center mb-8">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 pt-4 md:pt-6">
+        <div className="flex flex-wrap gap-2 md:gap-3 justify-center mb-6 md:mb-8">
           {["All", "Café", "Barber", "Restaurant", "Gig", "Museum"].map((cat) => (
             <button
               key={cat}
               onClick={() => setActiveFilter(cat)}
-              className={`px-6 py-3 rounded-full font-bold transition shadow-lg ${
+              className={`px-4 md:px-6 py-2 md:py-3 rounded-full font-bold transition shadow-lg text-sm md:text-base ${
                 activeFilter === cat
                   ? "bg-amber-600 text-white scale-105"
                   : "bg-white text-gray-700 hover:bg-amber-50"
@@ -1111,44 +1137,44 @@ export default function App() {
           ))}
         </div>
 
-        {/* HUNTS GRID - TWO COLUMNS */}
-        <div className="grid md:grid-cols-2 gap-6 pb-24">
+        {/* HUNTS GRID - 2 columns mobile, 4 columns desktop */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6 pb-16 md:pb-24">
           {filteredHunts.length === 0 ? (
-            <div className="col-span-2 text-center py-12 bg-white rounded-3xl shadow-xl p-8">
-              <p className="text-gray-600 text-xl mb-4">
+            <div className="col-span-2 lg:col-span-4 text-center py-8 md:py-12 bg-white rounded-3xl shadow-xl p-6 md:p-8">
+              <p className="text-base md:text-xl text-gray-600 mb-3 md:mb-4">
                 No {activeFilter === "All" ? "" : activeFilter} hunts available right now
               </p>
-              <p className="text-gray-500">Check back soon for new adventures!</p>
+              <p className="text-sm md:text-base text-gray-500">Check back soon for new adventures!</p>
             </div>
           ) : (
             filteredHunts.map((hunt) => (
-              <div key={hunt.id} className="bg-white rounded-3xl shadow-2xl overflow-hidden hover:shadow-3xl transition">
+              <div key={hunt.id} className="bg-white rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden hover:shadow-3xl transition">
                 <div className="relative">
                   <img
                     src={getSafePhotoUrl(hunt.photo)}
                     alt={hunt.business_name}
-                    className="w-full h-56 object-cover"
+                    className="w-full h-32 md:h-56 object-cover"
                   />
                 </div>
-                <div className="p-6">
-                  <span className="inline-block px-4 py-2 bg-amber-200 text-amber-800 rounded-full text-xs font-bold mb-3">
+                <div className="p-3 md:p-6">
+                  <span className="inline-block px-2 md:px-4 py-1 md:py-2 bg-amber-200 text-amber-800 rounded-full text-xs font-bold mb-2 md:mb-3">
                     {hunt.category}
                   </span>
-                  <p className="text-xl font-bold mb-3 text-gray-800">{hunt.riddle}</p>
-                  <p className="text-lg font-medium text-gray-700 mb-2">{hunt.business_name}</p>
+                  <p className="text-sm md:text-xl font-bold mb-2 md:mb-3 text-gray-800 line-clamp-2">{hunt.riddle}</p>
+                  <p className="text-xs md:text-lg font-medium text-gray-700 mb-2 line-clamp-1">{hunt.business_name}</p>
 
                   {completed.includes(hunt.id) ? (
                     <>
                       {hunt.discount && (
-                        <p className="text-md text-green-600 font-semibold mb-3">Gift: {hunt.discount}</p>
+                        <p className="text-xs md:text-md text-green-600 font-semibold mb-2 md:mb-3">Gift: {hunt.discount}</p>
                       )}
-                      <div className="bg-green-100 rounded-xl p-3 mb-4">
-                        <p className="text-xs text-green-800 font-semibold mb-1">Your secret code:</p>
-                        <p className="text-green-600 font-black text-xl">{hunt.code}</p>
+                      <div className="bg-green-100 rounded-xl p-2 md:p-3 mb-3 md:mb-4">
+                        <p className="text-xs text-green-800 font-semibold mb-1">Your code:</p>
+                        <p className="text-green-600 font-black text-sm md:text-xl">{hunt.code}</p>
                       </div>
                     </>
                   ) : hunt.discount ? (
-                    <p className="text-md text-gray-500 mb-4">Complete the hunt to unlock gift & code!</p>
+                    <p className="text-xs md:text-md text-gray-500 mb-3 md:mb-4">Complete to unlock!</p>
                   ) : null}
 
                   <button
@@ -1156,7 +1182,7 @@ export default function App() {
                       setCurrentHunt(hunt);
                       setShowModal(true);
                     }}
-                    className="w-full bg-green-600 hover:bg-green-700 text-white py-4 rounded-2xl font-black text-xl shadow-xl"
+                    className="w-full bg-green-600 hover:bg-green-700 text-white py-2 md:py-4 rounded-xl md:rounded-2xl font-black text-xs md:text-xl shadow-xl"
                   >
                     I'm at the spot!
                   </button>
@@ -1169,33 +1195,33 @@ export default function App() {
 
       {/* PROFILE MODAL */}
       {showProfileModal && (
-        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-6">
-          <div className="bg-white rounded-3xl shadow-2xl p-12 max-w-md w-full text-center relative max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4 md:p-6">
+          <div className="bg-white rounded-3xl shadow-2xl p-8 md:p-12 max-w-md w-full text-center relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setShowProfileModal(false)}
-              className="absolute top-6 right-6 text-4xl text-gray-500 hover:text-gray-700"
+              className="absolute top-4 right-4 md:top-6 md:right-6 text-3xl md:text-4xl text-gray-500 hover:text-gray-700"
             >
               ×
             </button>
-            <User className="w-16 h-16 text-purple-600 mx-auto mb-6" />
-            <h2 className="text-4xl font-black text-amber-900 mb-10">Your Profile</h2>
+            <User className="w-12 h-12 md:w-16 md:h-16 text-purple-600 mx-auto mb-4 md:mb-6" />
+            <h2 className="text-3xl md:text-4xl font-black text-amber-900 mb-8 md:mb-10">Your Profile</h2>
             
             {/* STATS */}
-            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-3xl p-8 mb-8">
-              <div className="flex justify-between items-center mb-6">
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-3xl p-6 md:p-8 mb-6 md:mb-8">
+              <div className="flex justify-between items-center mb-4 md:mb-6">
                 <div>
-                  <div className="text-5xl font-black text-orange-600">{streak}</div>
-                  <p className="text-gray-600 font-medium">day streak</p>
+                  <div className="text-4xl md:text-5xl font-black text-orange-600">{streak}</div>
+                  <p className="text-sm md:text-base text-gray-600 font-medium">day streak</p>
                 </div>
                 <div className="text-right">
-                  <div className="text-3xl font-black text-purple-600">{tier}</div>
-                  <p className="text-gray-600 font-medium">tier</p>
+                  <div className="text-2xl md:text-3xl font-black text-purple-600">{tier}</div>
+                  <p className="text-sm md:text-base text-gray-600 font-medium">tier</p>
                 </div>
               </div>
-              <div className="text-center pt-6 border-t-2 border-amber-200">
+              <div className="text-center pt-4 md:pt-6 border-t-2 border-amber-200">
                 <button
                   onClick={() => setShowCompletedModal(true)}
-                  className="text-xl underline text-gray-700 hover:text-gray-900 font-bold"
+                  className="text-lg md:text-xl underline text-gray-700 hover:text-gray-900 font-bold"
                 >
                   {totalHunts} completed · {activeHuntsCount} active
                 </button>
@@ -1208,9 +1234,9 @@ export default function App() {
                 setShowProfileModal(false);
                 setShowLeaderboard(true);
               }}
-              className="w-full bg-amber-600 hover:bg-amber-700 text-white py-6 rounded-2xl font-black text-2xl shadow-xl flex items-center justify-center gap-3"
+              className="w-full bg-amber-600 hover:bg-amber-700 text-white py-4 md:py-6 rounded-2xl font-black text-xl md:text-2xl shadow-xl flex items-center justify-center gap-2 md:gap-3"
             >
-              <Trophy className="w-8 h-8" /> View Leaderboard
+              <Trophy className="w-6 h-6 md:w-8 md:h-8" /> View Leaderboard
             </button>
           </div>
         </div>
@@ -1218,34 +1244,34 @@ export default function App() {
 
       {/* COMPLETED HUNTS MODAL */}
       {showCompletedModal && (
-        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-6">
-          <div className="bg-white rounded-3xl shadow-2xl p-12 max-w-md w-full text-center relative max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4 md:p-6">
+          <div className="bg-white rounded-3xl shadow-2xl p-8 md:p-12 max-w-md w-full text-center relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setShowCompletedModal(false)}
-              className="absolute top-6 right-6 text-4xl text-gray-500 hover:text-gray-700"
+              className="absolute top-4 right-4 md:top-6 md:right-6 text-3xl md:text-4xl text-gray-500 hover:text-gray-700"
             >
               ×
             </button>
-            <Trophy className="w-16 h-16 text-amber-600 mx-auto mb-6" />
-            <h2 className="text-4xl font-black text-amber-900 mb-10">
+            <Trophy className="w-12 h-12 md:w-16 md:h-16 text-amber-600 mx-auto mb-4 md:mb-6" />
+            <h2 className="text-3xl md:text-4xl font-black text-amber-900 mb-8 md:mb-10">
               Your Completed Hunts ({totalHunts})
             </h2>
             {completedHunts.length === 0 ? (
-              <p className="text-gray-600 text-xl">No completed hunts yet — get hunting!</p>
+              <p className="text-base md:text-xl text-gray-600">No completed hunts yet — get hunting!</p>
             ) : (
-              <div className="space-y-8">
+              <div className="space-y-6 md:space-y-8">
                 {completedHunts.map((hunt) => (
-                  <div key={hunt.id} className="bg-gray-50 rounded-2xl p-6 text-left">
+                  <div key={hunt.id} className="bg-gray-50 rounded-2xl p-4 md:p-6 text-left">
                     <img
                       src={getSafePhotoUrl(hunt.photo)}
                       alt="Hunt"
-                      className="w-full h-48 object-cover rounded-xl mb-4"
+                      className="w-full h-32 md:h-48 object-cover rounded-xl mb-3 md:mb-4"
                     />
-                    <p className="text-xl font-bold text-gray-800 mb-2">{hunt.riddle}</p>
-                    <p className="text-lg text-gray-700 mb-2">{hunt.business_name}</p>
-                    <div className="bg-green-100 rounded-xl p-4 mt-4">
-                      <p className="text-sm text-green-800 font-semibold mb-1">Your code:</p>
-                      <p className="text-green-600 font-black text-2xl">{hunt.code}</p>
+                    <p className="text-lg md:text-xl font-bold text-gray-800 mb-2">{hunt.riddle}</p>
+                    <p className="text-base md:text-lg text-gray-700 mb-2">{hunt.business_name}</p>
+                    <div className="bg-green-100 rounded-xl p-3 md:p-4 mt-3 md:mt-4">
+                      <p className="text-xs md:text-sm text-green-800 font-semibold mb-1">Your code:</p>
+                      <p className="text-green-600 font-black text-xl md:text-2xl">{hunt.code}</p>
                     </div>
                   </div>
                 ))}
@@ -1257,26 +1283,26 @@ export default function App() {
 
       {/* SELFIE MODAL */}
       {showModal && currentHunt && (
-        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-6">
-          <div className="bg-white rounded-3xl shadow-2xl p-12 max-w-md w-full text-center relative">
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4 md:p-6">
+          <div className="bg-white rounded-3xl shadow-2xl p-8 md:p-12 max-w-md w-full text-center relative">
             <button
               onClick={() => {
                 setShowModal(false);
                 setSelfieFile(null);
                 setCurrentHunt(null);
               }}
-              className="absolute top-6 right-6 text-4xl text-gray-500 hover:text-gray-700"
+              className="absolute top-4 right-4 md:top-6 md:right-6 text-3xl md:text-4xl text-gray-500 hover:text-gray-700"
             >
               ×
             </button>
-            <h3 className="text-4xl font-black text-gray-800 mb-4">Show the logo!</h3>
-            <p className="text-xl text-gray-600 mb-2">Take a selfie with the business logo</p>
-            <p className="text-lg text-amber-600 font-bold mb-10">Win £50 weekly for best selfie!</p>
+            <h3 className="text-3xl md:text-4xl font-black text-gray-800 mb-3 md:mb-4">Show the logo!</h3>
+            <p className="text-lg md:text-xl text-gray-600 mb-2">Take a selfie with the business logo</p>
+            <p className="text-base md:text-lg text-amber-600 font-bold mb-8 md:mb-10">Win £50 weekly for best selfie!</p>
 
             {selfieFile && (
-              <div className="mb-6 p-4 bg-green-50 rounded-2xl">
-                <p className="text-green-700 font-semibold">Photo ready: {selfieFile.name}</p>
-                <p className="text-sm text-gray-600 mt-1">{(selfieFile.size / 1024 / 1024).toFixed(2)} MB</p>
+              <div className="mb-4 md:mb-6 p-3 md:p-4 bg-green-50 rounded-2xl">
+                <p className="text-sm md:text-base text-green-700 font-semibold">Photo ready: {selfieFile.name}</p>
+                <p className="text-xs md:text-sm text-gray-600 mt-1">{(selfieFile.size / 1024 / 1024).toFixed(2)} MB</p>
               </div>
             )}
 
@@ -1296,48 +1322,48 @@ export default function App() {
             />
             <label
               htmlFor="camera"
-              className="w-44 h-44 bg-green-600 hover:bg-green-700 text-white rounded-full flex items-center justify-center shadow-2xl cursor-pointer mx-auto mb-12 transition"
+              className="w-32 h-32 md:w-44 md:h-44 bg-green-600 hover:bg-green-700 text-white rounded-full flex items-center justify-center shadow-2xl cursor-pointer mx-auto mb-8 md:mb-12 transition"
             >
-              <Camera className="w-20 h-20" />
+              <Camera className="w-16 h-16 md:w-20 md:h-20" />
             </label>
 
             <button
               onClick={uploadSelfie}
               disabled={!selfieFile || uploading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white py-6 rounded-2xl font-black text-2xl transition"
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white py-4 md:py-6 rounded-2xl font-black text-lg md:text-2xl transition"
             >
               {uploading ? "Uploading..." : "Submit & Unlock Code"}
             </button>
-            <p className="text-sm text-gray-500 mt-4">Location will be verified automatically</p>
+            <p className="text-xs md:text-sm text-gray-500 mt-3 md:mt-4">Location will be verified automatically</p>
           </div>
         </div>
       )}
 
       {/* LEADERBOARD MODAL */}
       {showLeaderboard && (
-        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-6">
-          <div className="bg-white rounded-3xl shadow-2xl p-12 max-w-md w-full text-center relative">
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4 md:p-6">
+          <div className="bg-white rounded-3xl shadow-2xl p-8 md:p-12 max-w-md w-full text-center relative">
             <button
               onClick={() => setShowLeaderboard(false)}
-              className="absolute top-6 right-6 text-4xl text-gray-500 hover:text-gray-700"
+              className="absolute top-4 right-4 md:top-6 md:right-6 text-3xl md:text-4xl text-gray-500 hover:text-gray-700"
             >
               ×
             </button>
-            <Trophy className="w-16 h-16 text-amber-600 mx-auto mb-6" />
-            <h2 className="text-4xl font-black text-amber-900 mb-10">Hackney Top Hunters</h2>
+            <Trophy className="w-12 h-12 md:w-16 md:h-16 text-amber-600 mx-auto mb-4 md:mb-6" />
+            <h2 className="text-3xl md:text-4xl font-black text-amber-900 mb-8 md:mb-10">Hackney Top Hunters</h2>
 
             {loadingLeaderboard ? (
-              <div className="py-12">
-                <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-4 border-amber-600"></div>
+              <div className="py-8 md:py-12">
+                <div className="inline-block animate-spin rounded-full h-10 w-10 md:h-12 md:w-12 border-b-4 border-amber-600"></div>
               </div>
             ) : leaderboardData.length === 0 ? (
-              <p className="text-gray-600 text-xl">No data available yet</p>
+              <p className="text-base md:text-xl text-gray-600">No data available yet</p>
             ) : (
-              <div className="space-y-6 text-left">
+              <div className="space-y-4 md:space-y-6 text-left">
                 {leaderboardData.map((user, idx) => (
                   <div
                     key={idx}
-                    className={`p-6 rounded-2xl ${
+                    className={`p-4 md:p-6 rounded-2xl ${
                       idx === 0
                         ? "bg-amber-100"
                         : idx === 1
@@ -1348,16 +1374,16 @@ export default function App() {
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <span className="text-3xl font-black text-gray-700">#{idx + 1}</span>
+                      <div className="flex items-center gap-3 md:gap-4">
+                        <span className="text-2xl md:text-3xl font-black text-gray-700">#{idx + 1}</span>
                         <div>
-                          <p className="font-bold text-xl text-gray-800">{user.displayName}</p>
-                          <p className="text-sm text-gray-600">{user.tier}</p>
+                          <p className="font-bold text-base md:text-xl text-gray-800">{user.displayName}</p>
+                          <p className="text-xs md:text-sm text-gray-600">{user.tier}</p>
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-2xl font-black text-amber-600">{user.hunts}</p>
-                        <p className="text-sm text-gray-600">hunts</p>
+                        <p className="text-xl md:text-2xl font-black text-amber-600">{user.hunts}</p>
+                        <p className="text-xs md:text-sm text-gray-600">hunts</p>
                       </div>
                     </div>
                   </div>
