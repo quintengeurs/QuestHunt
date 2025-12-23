@@ -8,6 +8,7 @@ import {
   X,
   AlertCircle,
   Camera,
+  User,
 } from "lucide-react";
 
 const supabaseUrl = "https://eeboxlitezqgjyrnssgx.supabase.co";
@@ -77,6 +78,7 @@ export default function App() {
   const [lastActive, setLastActive] = useState(null);
   const [currentHunt, setCurrentHunt] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showCompletedModal, setShowCompletedModal] = useState(false);
   const [selfieFile, setSelfieFile] = useState(null);
@@ -200,14 +202,14 @@ export default function App() {
 
       if (progressError) throw progressError;
 
-      let completedIds: string[] = [];
+      let completedIds = [];
       const progress = progressRows?.[0] || null;
 
       if (progress) {
         completedIds = Array.isArray(progress.completed_hunt_ids) ? progress.completed_hunt_ids : [];
 
         if (progressRows.length > 1) {
-          const all = new Set<string>();
+          const all = new Set();
           let maxTotal = 0, maxStreak = 0;
           progressRows.forEach((r) => {
             if (Array.isArray(r.completed_hunt_ids)) r.completed_hunt_ids.forEach((id) => all.add(id));
@@ -478,7 +480,7 @@ export default function App() {
 
     setCreatingHunt(true);
     try {
-      let photoUrl: string | null = null;
+      let photoUrl = null;
 
       if (newHuntPhoto) {
         const fileExt = newHuntPhoto.name.split(".").pop()?.toLowerCase() || "jpg";
@@ -534,7 +536,7 @@ export default function App() {
   ]);
 
   // ─── ADMIN APPROVE / REJECT ─────────────────────
-  const approveSelfie = useCallback(async (id: string) => {
+  const approveSelfie = useCallback(async (id) => {
     setProcessingSubmission(id);
     try {
       const { error } = await supabase.from("selfies").update({ approved: true }).eq("id", id);
@@ -547,7 +549,7 @@ export default function App() {
     }
   }, [loadAdminData]);
 
-  const rejectSelfie = useCallback(async (id: string) => {
+  const rejectSelfie = useCallback(async (id) => {
     if (!window.confirm("Reject this submission?")) return;
     setProcessingSubmission(id);
     try {
@@ -649,7 +651,7 @@ export default function App() {
     newHuntPhoto, loadAdminData
   ]);
 
-  const deleteHunt = useCallback(async (id: string) => {
+  const deleteHunt = useCallback(async (id) => {
     if (!window.confirm("Are you sure you want to delete this hunt? This cannot be undone.")) return;
 
     try {
@@ -1045,7 +1047,7 @@ export default function App() {
     <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50">
       {/* HEADER */}
       <div className="bg-white/80 backdrop-blur-lg shadow-lg p-6 sticky top-0 z-40">
-        <div className="max-w-md mx-auto flex justify-between items-center">
+        <div className="max-w-6xl mx-auto flex justify-between items-center">
           <h1 className="text-4xl font-black text-amber-900">Brew Hunt</h1>
           <div className="flex items-center gap-4">
             {isAdmin && (
@@ -1053,6 +1055,13 @@ export default function App() {
                 <Shield size={20} /> Admin
               </button>
             )}
+            <button 
+              onClick={() => setShowProfileModal(true)}
+              className="bg-purple-600 hover:bg-purple-700 text-white p-3 rounded-full shadow-lg"
+              title="View Profile"
+            >
+              <User size={24} />
+            </button>
             <button onClick={signOut} className="text-gray-600 hover:text-gray-800 flex items-center gap-2">
               <LogOut size={20} /> Log Out
             </button>
@@ -1062,7 +1071,7 @@ export default function App() {
 
       {/* ERROR BANNER */}
       {error && (
-        <div className="max-w-md mx-auto px-6 pt-6">
+        <div className="max-w-6xl mx-auto px-6 pt-6">
           <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-4 flex items-start gap-3">
             <AlertCircle className="text-red-600 flex-shrink-0 mt-1" size={20} />
             <div className="flex-1">
@@ -1075,29 +1084,8 @@ export default function App() {
         </div>
       )}
 
-      {/* STATS */}
-      <div className="max-w-md mx-auto p-6">
-        <div className="bg-white rounded-3xl shadow-2xl p-8 text-center">
-          <div className="flex justify-between items-center">
-            <div>
-              <div className="text-6xl font-black text-orange-600">{streak}</div>
-              <p className="text-gray-600 font-medium">day streak</p>
-            </div>
-            <div className="text-right">
-              <div className="text-3xl font-black text-purple-600">{tier}</div>
-              <button
-                onClick={() => setShowCompletedModal(true)}
-                className="text-xl underline text-gray-700 hover:text-gray-900"
-              >
-                {totalHunts} completed · {activeHuntsCount} active
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* FILTERS */}
-      <div className="max-w-md mx-auto px-6">
+      <div className="max-w-6xl mx-auto px-6 pt-6">
         <div className="flex flex-wrap gap-3 justify-center mb-8">
           {["All", "Café", "Barber", "Restaurant", "Gig", "Museum"].map((cat) => (
             <button
@@ -1114,19 +1102,10 @@ export default function App() {
           ))}
         </div>
 
-        <div className="text-center mb-8">
-          <button
-            onClick={() => setShowLeaderboard(true)}
-            className="text-amber-700 underline font-bold text-xl flex items-center gap-2 mx-auto hover:text-amber-900"
-          >
-            <Trophy className="w-6 h-6" /> Leaderboard
-          </button>
-        </div>
-
-        {/* HUNTS LIST */}
-        <div className="space-y-8 pb-24">
+        {/* HUNTS GRID - TWO COLUMNS */}
+        <div className="grid md:grid-cols-2 gap-6 pb-24">
           {filteredHunts.length === 0 ? (
-            <div className="text-center py-12 bg-white rounded-3xl shadow-xl p-8">
+            <div className="col-span-2 text-center py-12 bg-white rounded-3xl shadow-xl p-8">
               <p className="text-gray-600 text-xl mb-4">
                 No {activeFilter === "All" ? "" : activeFilter} hunts available right now
               </p>
@@ -1139,29 +1118,28 @@ export default function App() {
                   <img
                     src={getSafePhotoUrl(hunt.photo)}
                     alt={hunt.business_name}
-                    className="w-full h-72 object-cover"
+                    className="w-full h-56 object-cover"
                   />
                 </div>
-                <div className="p-8">
-                  <span className="inline-block px-5 py-2 bg-amber-200 text-amber-800 rounded-full text-sm font-bold mb-4">
+                <div className="p-6">
+                  <span className="inline-block px-4 py-2 bg-amber-200 text-amber-800 rounded-full text-xs font-bold mb-3">
                     {hunt.category}
                   </span>
-                  <p className="text-2xl font-bold mb-4 text-gray-800">{hunt.riddle}</p>
-                  <p className="text-xl font-medium text-gray-700 mb-2">{hunt.business_name}</p>
+                  <p className="text-xl font-bold mb-3 text-gray-800">{hunt.riddle}</p>
+                  <p className="text-lg font-medium text-gray-700 mb-2">{hunt.business_name}</p>
 
-                  {/* Hide code and discount until completed */}
                   {completed.includes(hunt.id) ? (
                     <>
                       {hunt.discount && (
-                        <p className="text-lg text-green-600 font-semibold mb-4">Gift: {hunt.discount}</p>
+                        <p className="text-md text-green-600 font-semibold mb-3">Gift: {hunt.discount}</p>
                       )}
-                      <div className="bg-green-100 rounded-xl p-4 mb-8">
-                        <p className="text-sm text-green-800 font-semibold mb-1">Your secret code:</p>
-                        <p className="text-green-600 font-black text-2xl">{hunt.code}</p>
+                      <div className="bg-green-100 rounded-xl p-3 mb-4">
+                        <p className="text-xs text-green-800 font-semibold mb-1">Your secret code:</p>
+                        <p className="text-green-600 font-black text-xl">{hunt.code}</p>
                       </div>
                     </>
                   ) : hunt.discount ? (
-                    <p className="text-lg text-gray-500 mb-8">Complete the hunt to unlock gift & code!</p>
+                    <p className="text-md text-gray-500 mb-4">Complete the hunt to unlock gift & code!</p>
                   ) : null}
 
                   <button
@@ -1169,7 +1147,7 @@ export default function App() {
                       setCurrentHunt(hunt);
                       setShowModal(true);
                     }}
-                    className="w-full bg-green-600 hover:bg-green-700 text-white py-6 rounded-2xl font-black text-2xl shadow-xl"
+                    className="w-full bg-green-600 hover:bg-green-700 text-white py-4 rounded-2xl font-black text-xl shadow-xl"
                   >
                     I'm at the spot!
                   </button>
@@ -1179,6 +1157,55 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {/* PROFILE MODAL */}
+      {showProfileModal && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-6">
+          <div className="bg-white rounded-3xl shadow-2xl p-12 max-w-md w-full text-center relative max-h-[90vh] overflow-y-auto">
+            <button
+              onClick={() => setShowProfileModal(false)}
+              className="absolute top-6 right-6 text-4xl text-gray-500 hover:text-gray-700"
+            >
+              ×
+            </button>
+            <User className="w-16 h-16 text-purple-600 mx-auto mb-6" />
+            <h2 className="text-4xl font-black text-amber-900 mb-10">Your Profile</h2>
+            
+            {/* STATS */}
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-3xl p-8 mb-8">
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <div className="text-5xl font-black text-orange-600">{streak}</div>
+                  <p className="text-gray-600 font-medium">day streak</p>
+                </div>
+                <div className="text-right">
+                  <div className="text-3xl font-black text-purple-600">{tier}</div>
+                  <p className="text-gray-600 font-medium">tier</p>
+                </div>
+              </div>
+              <div className="text-center pt-6 border-t-2 border-amber-200">
+                <button
+                  onClick={() => setShowCompletedModal(true)}
+                  className="text-xl underline text-gray-700 hover:text-gray-900 font-bold"
+                >
+                  {totalHunts} completed · {activeHuntsCount} active
+                </button>
+              </div>
+            </div>
+
+            {/* LEADERBOARD BUTTON */}
+            <button
+              onClick={() => {
+                setShowProfileModal(false);
+                setShowLeaderboard(true);
+              }}
+              className="w-full bg-amber-600 hover:bg-amber-700 text-white py-6 rounded-2xl font-black text-2xl shadow-xl flex items-center justify-center gap-3"
+            >
+              <Trophy className="w-8 h-8" /> View Leaderboard
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* COMPLETED HUNTS MODAL */}
       {showCompletedModal && (
@@ -1239,7 +1266,8 @@ export default function App() {
 
             {selfieFile && (
               <div className="mb-6 p-4 bg-green-50 rounded-2xl">
-                <p className="text-green-700 font-semibold">Photo ready!</p>
+                <p className="text-green-700 font-semibold">Photo ready: {selfieFile.name}</p>
+                <p className="text-sm text-gray-600 mt-1">{(selfieFile.size / 1024 / 1024).toFixed(2)} MB</p>
               </div>
             )}
 
@@ -1247,13 +1275,19 @@ export default function App() {
               type="file"
               accept="image/*"
               capture="environment"
-              onChange={(e) => setSelfieFile(e.target.files?.[0] || null)}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  console.log("File selected:", file.name, file.type, file.size);
+                  setSelfieFile(file);
+                }
+              }}
               className="hidden"
               id="camera"
             />
             <label
               htmlFor="camera"
-              className="w-44 h-44 bg-green-600 hover:bg-green-700 text-white rounded-full flex items-center justify-center shadow-2xl cursor-pointer mx-auto mb-12"
+              className="w-44 h-44 bg-green-600 hover:bg-green-700 text-white rounded-full flex items-center justify-center shadow-2xl cursor-pointer mx-auto mb-12 transition"
             >
               <Camera className="w-20 h-20" />
             </label>
