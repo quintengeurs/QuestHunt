@@ -149,50 +149,13 @@ export default function App() {
     return () => listener?.subscription.unsubscribe();
   }, []);
 
-  // ─── REALTIME SUBSCRIPTIONS ─────────────────────
-  useEffect(() => {
-    if (!session || showAdmin) return;
-
-    const huntsChannel = supabase
-      .channel("hunts-changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "hunts" }, () => fetchHunts())
-      .subscribe();
-
-    const progressChannel = supabase
-      .channel("progress-changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "user_progress",
-          filter: `user_id=eq.${session.user.id}`,
-        },
-        () => loadProgressAndHunts()
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(huntsChannel);
-      supabase.removeChannel(progressChannel);
-    };
-  }, [session, showAdmin]);
-
   // ─── LOAD DATA ─────────────────────
-  const applyFilter = useCallback(
-    (allHunts, completedIds, filterCategory) => {
-      let filtered = allHunts.filter((h) => !completedIds.includes(h.id));
-      if (filterCategory !== "All") filtered = filtered.filter((h) => h.category === filterCategory);
-      setFilteredHunts(filtered);
-    },
-    []
-  );
-
   const loadProgressAndHunts = useCallback(async () => {
     if (!session) return;
 
     try {
       setError("");
+      console.log("Loading progress and hunts...");
 
       const { data: progressRows, error: progressError } = await supabase
         .from("user_progress")
@@ -249,38 +212,77 @@ export default function App() {
       if (huntsError) throw huntsError;
 
       setHunts(huntsData || []);
-      applyFilter(huntsData || [], completedIds, activeFilter);
+      
+      // Apply filter directly here
+      let filtered = huntsData || [];
+      filtered = filtered.filter((h) => !completedIds.includes(h.id));
+      if (activeFilter !== "All") {
+        filtered = filtered.filter((h) => h.category === activeFilter);
+      }
+      setFilteredHunts(filtered);
+      
       setDataLoaded(true);
+      console.log("Data loaded successfully");
     } catch (e) {
       console.error("Load error:", e);
       setError("Failed to load hunts. Please refresh.");
       setDataLoaded(true);
     }
-  }, [session, activeFilter, applyFilter]);
+  }, [session, activeFilter]);
 
+  // Separate effect for initial load
   useEffect(() => {
-    if (!session) return;
-    if (showAdmin) {
-      loadAdminData();
-    } else {
-      setDataLoaded(false);
-      loadProgressAndHunts();
+    if (!session || showAdmin) return;
+    
+    setDataLoaded(false);
+    loadProgressAndHunts();
+  }, [session, showAdmin]);
+
+  // Separate effect for filter changes
+  useEffect(() => {
+    if (!dataLoaded || hunts.length === 0) return;
+    
+    let filtered = hunts.filter((h) => !completed.includes(h.id));
+    if (activeFilter !== "All") {
+      filtered = filtered.filter((h) => h.category === activeFilter);
     }
-  }, [session, showAdmin, loadProgressAndHunts]);
+    setFilteredHunts(filtered);
+  }, [activeFilter, hunts, completed, dataLoaded]);
 
-  const fetchHunts = useCallback(async () => {
-    const todayISO = new Date().toISOString().split("T")[0];
-    const { data } = await supabase
-      .from("hunts")
-      .select("*")
-      .gte("date", todayISO)
-      .order("date", { ascending: false });
-    if (data) setHunts(data);
-  }, []);
-
+  // ─── REALTIME SUBSCRIPTIONS ─────────────────────
   useEffect(() => {
-    if (dataLoaded && hunts.length > 0) applyFilter(hunts, completed, activeFilter);
-  }, [hunts, completed, activeFilter, dataLoaded, applyFilter]);
+    if (!session || showAdmin) return;
+
+    const huntsChannel = supabase
+      .channel("hunts-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "hunts" }, () => {
+        console.log("Hunts changed, reloading...");
+        loadProgressAndHunts();
+      })
+      .subscribe();
+
+    const progressChannel = supabase
+      .channel("progress-changes")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "user_progress",
+          filter: `user_id=eq.${session.user.id}`,
+        },
+        () => {
+          console.log("Progress changed, reloading...");
+          loadProgressAndHunts();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(huntsChannel);
+      supabase.removeChannel(progressChannel);
+    };
+  }, [session, showAdmin, loadProgressAndHunts]);
 
   // ─── SELFIE UPLOAD ─────────────────────
   const uploadSelfie = useCallback(async () => {
@@ -463,6 +465,13 @@ export default function App() {
       setError("Failed to load admin data");
     }
   }, []);
+
+  // Load admin data when entering admin mode
+  useEffect(() => {
+    if (showAdmin && isAdmin) {
+      loadAdminData();
+    }
+  }, [showAdmin, isAdmin, loadAdminData]);
 
   // ─── CREATE HUNT ─────────────────────
   const createHunt = useCallback(async () => {
