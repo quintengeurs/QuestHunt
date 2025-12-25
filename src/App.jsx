@@ -61,6 +61,34 @@ function getYesterdayLocalDate() {
   return `${year}-${month}-${day}`;
 }
 
+// Calculate expiry date based on duration
+function calculateExpiryDate(startDate, duration) {
+  const date = new Date(startDate);
+  switch (duration) {
+    case "1hour":
+      date.setHours(date.getHours() + 1);
+      break;
+    case "3hours":
+      date.setHours(date.getHours() + 3);
+      break;
+    case "12hours":
+      date.setHours(date.getHours() + 12);
+      break;
+    case "1day":
+      date.setDate(date.getDate() + 1);
+      break;
+    case "3days":
+      date.setDate(date.getDate() + 3);
+      break;
+    case "1week":
+      date.setDate(date.getDate() + 7);
+      break;
+    default:
+      date.setDate(date.getDate() + 1);
+  }
+  return date.toISOString();
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [sessionLoading, setSessionLoading] = useState(true);
@@ -108,18 +136,35 @@ export default function App() {
   const [newHuntLat, setNewHuntLat] = useState("");
   const [newHuntLon, setNewHuntLon] = useState("");
   const [newHuntRadius, setNewHuntRadius] = useState("50");
+  const [newHuntDuration, setNewHuntDuration] = useState("1day");
   const [newHuntPhoto, setNewHuntPhoto] = useState(null);
   const [creatingHunt, setCreatingHunt] = useState(false);
 
   // ─── AUTH & PROFILE AUTO-CREATE ─────────────────────
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setSessionLoading(false);
-      if (data.session?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-        setIsAdmin(true);
+    const initAuth = async () => {
+      try {
+        const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error("Session error:", error);
+          setSessionLoading(false);
+          return;
+        }
+
+        setSession(currentSession);
+        
+        if (currentSession?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+          setIsAdmin(true);
+        }
+      } catch (err) {
+        console.error("Auth initialization error:", err);
+      } finally {
+        setSessionLoading(false);
       }
-    });
+    };
+
+    initAuth();
 
     const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
@@ -213,12 +258,12 @@ export default function App() {
         setLastActive(null);
       }
 
-      // Load active hunts
-      const todayISO = new Date().toISOString().split("T")[0];
+      // Load active hunts - filter by expiry_date instead of just date
+      const now = new Date().toISOString();
       const { data: huntsData, error: huntsError } = await supabase
         .from("hunts")
         .select("*")
-        .gte("date", todayISO)
+        .gte("expiry_date", now)
         .order("date", { ascending: false });
 
       if (huntsError) throw huntsError;
@@ -233,13 +278,16 @@ export default function App() {
     }
   }, [session?.user?.id, showAdmin]);
 
-  // Initial load when session is ready
+  // Initial load when session is ready - FIXED: Only load when we have a confirmed session
   useEffect(() => {
     if (sessionLoading) return;
+    
     if (!session) {
-      setDataLoaded(false);
+      // User is not logged in, show login screen
+      setDataLoaded(true); // Set to true so we don't show loading screen
       return;
     }
+    
     if (showAdmin) return;
 
     loadProgressAndHunts();
@@ -483,8 +531,13 @@ export default function App() {
         photoUrl = data.publicUrl;
       }
 
+      const startDate = newHuntDate || getTodayLocalDate();
+      const expiryDate = calculateExpiryDate(startDate, newHuntDuration);
+
       const { error } = await supabase.from("hunts").insert({
-        date: newHuntDate || getTodayLocalDate(),
+        date: startDate,
+        expiry_date: expiryDate,
+        duration: newHuntDuration,
         category: newHuntCategory || "Food & Drink",
         riddle: newHuntRiddle.trim(),
         business_name: newHuntBusinessName.trim(),
@@ -508,6 +561,7 @@ export default function App() {
       setNewHuntLat("");
       setNewHuntLon("");
       setNewHuntRadius("50");
+      setNewHuntDuration("1day");
       setNewHuntPhoto(null);
       loadAdminData();
       setAdminTab("hunts");
@@ -519,7 +573,7 @@ export default function App() {
   }, [
     newHuntDate, newHuntCategory, newHuntRiddle, newHuntBusinessName,
     newHuntCode, newHuntDiscount, newHuntLat, newHuntLon, newHuntRadius,
-    newHuntPhoto, loadAdminData
+    newHuntDuration, newHuntPhoto, loadAdminData
   ]);
 
   // ─── ADMIN APPROVE / REJECT ─────────────────────
@@ -562,6 +616,7 @@ export default function App() {
     setNewHuntLat(hunt.lat?.toString() || "");
     setNewHuntLon(hunt.lon?.toString() || "");
     setNewHuntRadius(hunt.radius?.toString() || "50");
+    setNewHuntDuration(hunt.duration || "1day");
     setNewHuntPhoto(null);
     setShowEditModal(true);
   }, []);
@@ -598,8 +653,13 @@ export default function App() {
         photoUrl = data.publicUrl;
       }
 
+      const startDate = newHuntDate || getTodayLocalDate();
+      const expiryDate = calculateExpiryDate(startDate, newHuntDuration);
+
       const { error } = await supabase.from("hunts").update({
-        date: newHuntDate || getTodayLocalDate(),
+        date: startDate,
+        expiry_date: expiryDate,
+        duration: newHuntDuration,
         category: newHuntCategory || "Food & Drink",
         riddle: newHuntRiddle.trim(),
         business_name: newHuntBusinessName.trim(),
@@ -625,6 +685,7 @@ export default function App() {
       setNewHuntLat("");
       setNewHuntLon("");
       setNewHuntRadius("50");
+      setNewHuntDuration("1day");
       setNewHuntPhoto(null);
       loadAdminData();
     } catch (err) {
@@ -635,7 +696,7 @@ export default function App() {
   }, [
     editingHunt, newHuntDate, newHuntCategory, newHuntRiddle, newHuntBusinessName,
     newHuntCode, newHuntDiscount, newHuntLat, newHuntLon, newHuntRadius,
-    newHuntPhoto, loadAdminData
+    newHuntDuration, newHuntPhoto, loadAdminData
   ]);
 
   const deleteHunt = useCallback(async (id) => {
@@ -759,6 +820,7 @@ export default function App() {
                     <p className="text-sm md:text-base text-gray-600 italic mb-4">"{hunt.riddle}"</p>
                     <p className="text-xs md:text-sm"><strong>Code:</strong> {hunt.code}</p>
                     <p className="text-xs md:text-sm"><strong>Date:</strong> {new Date(hunt.date).toLocaleDateString()}</p>
+                    <p className="text-xs md:text-sm"><strong>Duration:</strong> {hunt.duration ? hunt.duration.replace('hour', ' hour').replace('day', ' day').replace('week', ' week') : '1 day'}</p>
                     <p className="text-xs md:text-sm mb-4"><strong>Radius:</strong> {hunt.radius}m</p>
                     <div className="flex gap-2 md:gap-3">
                       <button
@@ -838,6 +900,17 @@ export default function App() {
                   <input type="date" value={newHuntDate} onChange={(e) => setNewHuntDate(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" />
                 </div>
                 <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Duration</label>
+                  <select value={newHuntDuration} onChange={(e) => setNewHuntDuration(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl">
+                    <option value="1hour">1 hour</option>
+                    <option value="3hours">3 hours</option>
+                    <option value="12hours">12 hours</option>
+                    <option value="1day">1 day</option>
+                    <option value="3days">3 days</option>
+                    <option value="1week">1 week</option>
+                  </select>
+                </div>
+                <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">Category</label>
                   <select value={newHuntCategory} onChange={(e) => setNewHuntCategory(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl">
                     <option value="">Select category</option>
@@ -913,6 +986,17 @@ export default function App() {
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Active From Date</label>
                     <input type="date" value={newHuntDate} onChange={(e) => setNewHuntDate(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Duration</label>
+                    <select value={newHuntDuration} onChange={(e) => setNewHuntDuration(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl">
+                      <option value="1hour">1 hour</option>
+                      <option value="3hours">3 hours</option>
+                      <option value="12hours">12 hours</option>
+                      <option value="1day">1 day</option>
+                      <option value="3days">3 days</option>
+                      <option value="1week">1 week</option>
+                    </select>
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Category</label>
