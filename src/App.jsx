@@ -144,21 +144,38 @@ export default function App() {
   useEffect(() => {
     const initAuth = async () => {
       try {
+        // Add a small delay to ensure UI is mounted and to prevent flash of loading
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         const { data: { session: currentSession }, error } = await supabase.auth.getSession();
         
         if (error) {
           console.error("Session error:", error);
           setSessionLoading(false);
+          setDataLoaded(true);
           return;
         }
 
+        console.log("Session check complete:", currentSession ? "Has session" : "No session");
+        
+        if (currentSession) {
+          console.log("ℹ️  Already logged in as:", currentSession.user.email);
+          console.log("ℹ️  To see login screen, click the logout button");
+        }
+        
         setSession(currentSession);
         
         if (currentSession?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
           setIsAdmin(true);
         }
+        
+        // If no session, mark as loaded immediately so login screen shows
+        if (!currentSession) {
+          setDataLoaded(true);
+        }
       } catch (err) {
         console.error("Auth initialization error:", err);
+        setDataLoaded(true);
       } finally {
         setSessionLoading(false);
       }
@@ -167,6 +184,7 @@ export default function App() {
     initAuth();
 
     const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      console.log("Auth state changed:", _event, session ? "Has session" : "No session");
       setSession(session);
       setSessionLoading(false);
 
@@ -191,6 +209,9 @@ export default function App() {
             full_name: session.user.user_metadata.full_name || null,
           });
         }
+      } else {
+        // No session = show login immediately
+        setDataLoaded(true);
       }
     });
 
@@ -201,14 +222,16 @@ export default function App() {
   const loadProgressAndHunts = useCallback(async () => {
     // Absolute guard - never run without session
     if (!session?.user?.id) {
+      console.log("❌ Load aborted - no valid session");
       return;
     }
     
     if (showAdmin) {
+      console.log("❌ Load aborted - admin mode");
       return;
     }
 
-    console.log("Loading progress and hunts for user:", session.user.id);
+    console.log("📊 Loading progress and hunts for user:", session.user.id);
 
     try {
       setError("");
@@ -276,9 +299,9 @@ export default function App() {
       if (huntsError) throw huntsError;
 
       setHunts(huntsData || []);
-      console.log("Data loaded successfully");
+      console.log("✅ Data loaded successfully -", huntsData?.length || 0, "hunts found");
     } catch (e) {
-      console.error("Load error:", e);
+      console.error("❌ Load error:", e);
       setError("Failed to load hunts. Please refresh.");
     } finally {
       setDataLoaded(true);
@@ -289,26 +312,26 @@ export default function App() {
   useEffect(() => {
     // Wait for session to be checked
     if (sessionLoading) {
-      console.log("Still loading session...");
+      console.log("⏳ Still loading session...");
       return;
     }
     
     // No session = show login (mark as loaded so we don't show loading spinner)
     if (!session) {
-      console.log("No session - showing login screen");
+      console.log("🔓 No session - showing login screen");
       setDataLoaded(true);
       return;
     }
     
     // Don't load data in admin view
     if (showAdmin) {
-      console.log("Admin mode - skipping data load");
+      console.log("🔧 Admin mode - skipping data load");
       setDataLoaded(true);
       return;
     }
 
     // We have a session and we're not in admin - load the data
-    console.log("Valid session found, loading data...");
+    console.log("✅ Valid session found - loading user data...");
     loadProgressAndHunts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, sessionLoading, showAdmin]);
