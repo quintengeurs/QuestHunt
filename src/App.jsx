@@ -63,7 +63,23 @@ function getYesterdayLocalDate() {
 
 // Calculate expiry date based on duration
 function calculateExpiryDate(startDate, duration) {
-  const date = new Date(startDate);
+  // Handle date string format (YYYY-MM-DD) by adding time component
+  // to avoid timezone issues
+  let date;
+  if (typeof startDate === 'string' && startDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    // Date-only string (YYYY-MM-DD), add noon time to avoid timezone issues
+    date = new Date(startDate + 'T12:00:00');
+  } else {
+    date = new Date(startDate);
+  }
+  
+  // Validate date
+  if (isNaN(date.getTime())) {
+    console.error('Invalid start date:', startDate);
+    // Fallback to now
+    date = new Date();
+  }
+  
   switch (duration) {
     case "1hour":
       date.setHours(date.getHours() + 1);
@@ -86,6 +102,7 @@ function calculateExpiryDate(startDate, duration) {
     default:
       date.setDate(date.getDate() + 1);
   }
+  
   return date.toISOString();
 }
 
@@ -249,16 +266,28 @@ export default function App() {
       let completedIds = [];
       const progress = progressRows?.[0] || null;
 
-  if (progress) {
+      if (progress) {
         completedIds = Array.isArray(progress.completed_hunt_ids) ? progress.completed_hunt_ids : [];
-        
-        // If multiple rows exist (shouldn't happen with UNIQUE constraint), use the first one
+
         if (progressRows.length > 1) {
-          console.warn("⚠️ Multiple user_progress rows found. Using most recent. Consider cleaning up manually.");
+          const all = new Set();
+          let maxTotal = 0, maxStreak = 0;
+          progressRows.forEach((r) => {
+            if (Array.isArray(r.completed_hunt_ids)) r.completed_hunt_ids.forEach((id) => all.add(id));
+            maxTotal = Math.max(maxTotal, r.total_hunts || 0);
+            maxStreak = Math.max(maxStreak, r.streak || 0);
+          });
+          completedIds = Array.from(all);
+          setTotalHunts(completedIds.length);
+          setStreak(maxStreak);
+
+          // Note: Duplicate cleanup removed to prevent infinite loop via realtime subscriptions
+          // Clean up duplicates manually in Supabase SQL Editor if needed
+        } else {
+          setTotalHunts(progress.total_hunts || 0);
+          setStreak(progress.streak || 0);
         }
-        
-        setTotalHunts(progress.total_hunts || 0);
-        setStreak(progress.streak || 0);
+
         setCompleted(completedIds);
         setTier(
           completedIds.length >= 20 ? "Legend" :
