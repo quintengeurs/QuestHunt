@@ -249,30 +249,16 @@ export default function App() {
       let completedIds = [];
       const progress = progressRows?.[0] || null;
 
-      if (progress) {
+  if (progress) {
         completedIds = Array.isArray(progress.completed_hunt_ids) ? progress.completed_hunt_ids : [];
-
+        
+        // If multiple rows exist (shouldn't happen with UNIQUE constraint), use the first one
         if (progressRows.length > 1) {
-          const all = new Set();
-          let maxTotal = 0, maxStreak = 0;
-          progressRows.forEach((r) => {
-            if (Array.isArray(r.completed_hunt_ids)) r.completed_hunt_ids.forEach((id) => all.add(id));
-            maxTotal = Math.max(maxTotal, r.total_hunts || 0);
-            maxStreak = Math.max(maxStreak, r.streak || 0);
-          });
-          completedIds = Array.from(all);
-          setTotalHunts(completedIds.length);
-          setStreak(maxStreak);
-
-          // Clean up duplicate rows
-          for (let i = 1; i < progressRows.length; i++) {
-            await supabase.from("user_progress").delete().eq("id", progressRows[i].id);
-          }
-        } else {
-          setTotalHunts(progress.total_hunts || 0);
-          setStreak(progress.streak || 0);
+          console.warn("⚠️ Multiple user_progress rows found. Using most recent. Consider cleaning up manually.");
         }
-
+        
+        setTotalHunts(progress.total_hunts || 0);
+        setStreak(progress.streak || 0);
         setCompleted(completedIds);
         setTier(
           completedIds.length >= 20 ? "Legend" :
