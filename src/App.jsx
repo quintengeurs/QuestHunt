@@ -367,29 +367,48 @@ export default function App() {
     .filter((h) => !completed.includes(h.id))
     .filter((h) => activeFilter === "All" || h.category === activeFilter);
 
-  // Realtime updates
-  useEffect(() => {
-    if (!session || showAdmin) return;
+// Realtime updates (with fallback)
+useEffect(() => {
+  if (!session || showAdmin) return;
 
-    const huntsChannel = supabase
+  let huntsChannel, progressChannel;
+
+  const setupRealtime = () => {
+    huntsChannel = supabase
       .channel("hunts-changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "hunts" }, loadProgressAndHunts)
-      .subscribe();
+      .on("postgres_changes", { event: "*", schema: "public", table: "hunts" }, () => {
+        console.log("Realtime hunt change detected");
+        loadProgressAndHunts();
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") console.log("Realtime hunts connected");
+        if (status === "CLOSED" || status === "CHANNEL_ERROR") {
+          console.warn("Realtime hunts failed - will retry on next load");
+        }
+      });
 
-    const progressChannel = supabase
+    progressChannel = supabase
       .channel("progress-changes")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "user_progress", filter: `user_id=eq.${session.user.id}` },
-        loadProgressAndHunts
+        () => {
+          console.log("Realtime progress change detected");
+          loadProgressAndHunts();
+        }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") console.log("Realtime progress connected");
+      });
+  };
 
-    return () => {
-      supabase.removeChannel(huntsChannel);
-      supabase.removeChannel(progressChannel);
-    };
-  }, [session, showAdmin, loadProgressAndHunts]);
+  setupRealtime();
+
+  return () => {
+    supabase.removeChannel(huntsChannel);
+    supabase.removeChannel(progressChannel);
+  };
+}, [session, showAdmin, loadProgressAndHunts]);
 
   // ─── SELFIE UPLOAD ─────────────────────
   const uploadSelfie = useCallback(async () => {
