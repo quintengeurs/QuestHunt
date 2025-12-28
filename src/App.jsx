@@ -1302,8 +1302,12 @@ export default function App() {
 
                   <button
                     onClick={() => {
-                      setCurrentHunt(hunt);
-                      setShowModal(true);
+                      if (dataLoaded) {  // Only open if data already loaded
+                        setCurrentHunt(hunt);
+                        setShowModal(true);
+                      } else {
+                        alert("Data still loading — please wait a moment");
+                      }
                     }}
                     className="w-full bg-green-600 hover:bg-green-700 text-white py-2 md:py-4 rounded-xl md:rounded-2xl font-black text-xs md:text-xl shadow-xl"
                   >
