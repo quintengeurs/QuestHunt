@@ -192,9 +192,20 @@ export default function App() {
         }
       } catch (err) {
         console.error("Auth initialization error:", err);
+        setSession(null);  // Force no session on error
         setDataLoaded(true);
       } finally {
         setSessionLoading(false);
+        
+        // Safety net: if something hangs, force login screen after 8 seconds
+        setTimeout(() => {
+          if (sessionLoading || !dataLoaded) {
+            console.warn("Auth load timed out - forcing login screen");
+            setSession(null);
+            setSessionLoading(false);
+            setDataLoaded(true);
+          }
+        }, 8000);
       }
     };
 
