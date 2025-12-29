@@ -253,12 +253,14 @@ export default function App() {
     try {
       setError("");
 
-      // User progress
+      console.log("🔍 DEBUG: Fetching user_progress for user:", session.user.id);
       const { data: progressRows, error: progressError } = await supabase
         .from("user_progress")
         .select("*")
         .eq("user_id", session.user.id)
         .order("last_active", { ascending: false });
+
+      console.log("🔍 DEBUG: user_progress result → data:", progressRows, "error:", progressError);
 
       if (progressError) throw progressError;
 
