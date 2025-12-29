@@ -61,22 +61,16 @@ function getYesterdayLocalDate() {
   return `${year}-${month}-${day}`;
 }
 
-// Calculate expiry date based on duration
 function calculateExpiryDate(startDate, duration) {
-  // Handle date string format (YYYY-MM-DD) by adding time component
-  // to avoid timezone issues
   let date;
   if (typeof startDate === 'string' && startDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-    // Date-only string (YYYY-MM-DD), add noon time to avoid timezone issues
     date = new Date(startDate + 'T12:00:00');
   } else {
     date = new Date(startDate);
   }
   
-  // Validate date
   if (isNaN(date.getTime())) {
     console.error('Invalid start date:', startDate);
-    // Fallback to now
     date = new Date();
   }
   
@@ -161,7 +155,6 @@ export default function App() {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // Add a small delay to ensure UI is mounted and to prevent flash of loading
         await new Promise(resolve => setTimeout(resolve, 100));
         
         const { data: { session: currentSession }, error } = await supabase.auth.getSession();
@@ -186,18 +179,16 @@ export default function App() {
           setIsAdmin(true);
         }
         
-        // If no session, mark as loaded immediately so login screen shows
         if (!currentSession) {
           setDataLoaded(true);
         }
       } catch (err) {
         console.error("Auth initialization error:", err);
-        setSession(null);  // Force no session on error
+        setSession(null);
         setDataLoaded(true);
       } finally {
         setSessionLoading(false);
         
-        // Safety net: if something hangs, force login screen after 8 seconds
         setTimeout(() => {
           if (sessionLoading || !dataLoaded) {
             console.warn("Auth load timed out - forcing login screen");
@@ -238,7 +229,6 @@ export default function App() {
           });
         }
       } else {
-        // No session = show login immediately
         setDataLoaded(true);
       }
     });
@@ -248,7 +238,6 @@ export default function App() {
 
   // ─── LOAD USER DATA ─────────────────────
   const loadProgressAndHunts = useCallback(async () => {
-    // Absolute guard - never run without session
     if (!session?.user?.id) {
       console.log("❌ Load aborted - no valid session");
       return;
@@ -263,7 +252,6 @@ export default function App() {
 
     try {
       setError("");
-      setDataLoaded(false);
 
       // User progress
       const { data: progressRows, error: progressError } = await supabase
@@ -291,9 +279,6 @@ export default function App() {
           completedIds = Array.from(all);
           setTotalHunts(completedIds.length);
           setStreak(maxStreak);
-
-          // Note: Duplicate cleanup removed to prevent infinite loop via realtime subscriptions
-          // Clean up duplicates manually in Supabase SQL Editor if needed
         } else {
           setTotalHunts(progress.total_hunts || 0);
           setStreak(progress.streak || 0);
@@ -314,7 +299,7 @@ export default function App() {
         setLastActive(null);
       }
 
-      // Load active hunts - filter by expiry_date instead of just date
+      // Load active hunts
       const now = new Date().toISOString();
       const { data: huntsData, error: huntsError } = await supabase
         .from("hunts")
@@ -325,10 +310,14 @@ export default function App() {
       if (huntsError) throw huntsError;
 
       setHunts(huntsData || []);
-      console.log("✅ Data loaded successfully -", huntsData?.length || 0, "hunts found");
+      console.log("✅ Data loaded successfully -", (huntsData?.length || 0), "active hunts found");
+      if ((huntsData || []).length === 0) {
+        console.log("ℹ️ No active hunts currently available");
+      }
     } catch (e) {
       console.error("❌ Load error:", e);
-      setError("Failed to load hunts. Please refresh.");
+      setError("Failed to load hunts – check connection or try refresh.");
+      setHunts([]); // Force empty state on error
     } finally {
       setDataLoaded(true);
     }
@@ -336,79 +325,71 @@ export default function App() {
 
   // Initial load when session is ready
   useEffect(() => {
-    // Wait for session to be checked
     if (sessionLoading) {
       console.log("⏳ Still loading session...");
       return;
     }
     
-    // No session = show login (mark as loaded so we don't show loading spinner)
     if (!session) {
       console.log("🔓 No session - showing login screen");
       setDataLoaded(true);
       return;
     }
     
-    // Don't load data in admin view
     if (showAdmin) {
       console.log("🔧 Admin mode - skipping data load");
       setDataLoaded(true);
       return;
     }
 
-    // We have a session and we're not in admin - load the data
     console.log("✅ Valid session found - loading user data...");
     loadProgressAndHunts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, sessionLoading, showAdmin]);
+  }, [session, sessionLoading, showAdmin, loadProgressAndHunts]);
 
-  // Filtered hunts (centralised – no duplicate logic)
+  // Filtered hunts
   const filteredHunts = hunts
     .filter((h) => !completed.includes(h.id))
     .filter((h) => activeFilter === "All" || h.category === activeFilter);
 
-// Realtime updates (with fallback)
-useEffect(() => {
-  if (!session || showAdmin) return;
+  // Realtime updates (no loading flicker)
+  useEffect(() => {
+    if (!session || showAdmin) return;
 
-  let huntsChannel, progressChannel;
+    let huntsChannel, progressChannel;
 
-  const setupRealtime = () => {
-    huntsChannel = supabase
-      .channel("hunts-changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "hunts" }, () => {
-        console.log("Realtime hunt change detected");
-        loadProgressAndHunts();
-      })
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") console.log("Realtime hunts connected");
-        if (status === "CLOSED" || status === "CHANNEL_ERROR") {
-          console.warn("Realtime hunts failed - will retry on next load");
-        }
-      });
-
-    progressChannel = supabase
-      .channel("progress-changes")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "user_progress", filter: `user_id=eq.${session.user.id}` },
-        () => {
-          console.log("Realtime progress change detected");
+    const setupRealtime = () => {
+      huntsChannel = supabase
+        .channel("hunts-changes")
+        .on("postgres_changes", { event: "*", schema: "public", table: "hunts" }, () => {
+          console.log("Realtime hunt change detected");
           loadProgressAndHunts();
-        }
-      )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") console.log("Realtime progress connected");
-      });
-  };
+        })
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") console.log("Realtime hunts connected");
+        });
 
-  setupRealtime();
+      progressChannel = supabase
+        .channel("progress-changes")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "user_progress", filter: `user_id=eq.${session.user.id}` },
+          () => {
+            console.log("Realtime progress change detected");
+            loadProgressAndHunts();
+          }
+        )
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") console.log("Realtime progress connected");
+        });
+    };
 
-  return () => {
-    supabase.removeChannel(huntsChannel);
-    supabase.removeChannel(progressChannel);
-  };
-}, [session, showAdmin, loadProgressAndHunts]);
+    setupRealtime();
+
+    return () => {
+      supabase.removeChannel(huntsChannel);
+      supabase.removeChannel(progressChannel);
+    };
+  }, [session, showAdmin, loadProgressAndHunts]);
 
   // ─── SELFIE UPLOAD ─────────────────────
   const uploadSelfie = useCallback(async () => {
@@ -1165,9 +1146,7 @@ useEffect(() => {
   }
 
   // ─── LOGIN SCREEN ─────────────────────
-  // Show login if: still checking session OR no session exists
   if (sessionLoading || !session) {
-    // If still checking session, show a minimal loading state
     if (sessionLoading) {
       return (
         <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50 flex items-center justify-center px-4">
@@ -1179,7 +1158,6 @@ useEffect(() => {
       );
     }
     
-    // No session = show login form
     return (
       <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50 flex items-center justify-center px-4 md:px-6">
         <div className="bg-white rounded-3xl shadow-2xl p-8 md:p-12 max-w-md w-full text-center">
@@ -1321,12 +1299,8 @@ useEffect(() => {
 
                   <button
                     onClick={() => {
-                      if (dataLoaded) {  // Only open if data already loaded
-                        setCurrentHunt(hunt);
-                        setShowModal(true);
-                      } else {
-                        alert("Data still loading — please wait a moment");
-                      }
+                      setCurrentHunt(hunt);
+                      setShowModal(true);
                     }}
                     className="w-full bg-green-600 hover:bg-green-700 text-white py-2 md:py-4 rounded-xl md:rounded-2xl font-black text-xs md:text-xl shadow-xl"
                   >
@@ -1533,6 +1507,3 @@ useEffect(() => {
     </div>
   );
 }
-
-
-
