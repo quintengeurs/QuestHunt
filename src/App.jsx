@@ -167,86 +167,6 @@ export default function App() {
   const [newHuntTrim, setNewHuntTrim] = useState("none");
   const [creatingHunt, setCreatingHunt] = useState(false);
 
-  // ─── AUTH & DATA LOADING ─────────────────────
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        const { data: { session: currentSession }, error } = await supabase.auth.getSession();
-        
-        if (error) {
-          console.error("Session error:", error);
-          setSessionLoading(false);
-          setDataLoaded(true);
-          return;
-        }
-
-        console.log("Session check complete:", currentSession ? "Has session" : "No session");
-        
-        setSession(currentSession);
-        
-        if (currentSession?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-          setIsAdmin(true);
-        }
-        
-        if (!currentSession) {
-          setDataLoaded(true);
-        }
-      } catch (err) {
-        console.error("Auth initialization error:", err);
-        setSession(null);
-        setDataLoaded(true);
-      } finally {
-        setSessionLoading(false);
-      }
-    };
-
-    initAuth();
-
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Auth state changed:", event, session ? "Has session" : "No session");
-      
-      setSession(session);
-      setSessionLoading(false);
-
-      if (session?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-        setIsAdmin(true);
-      } else {
-        setIsAdmin(false);
-        setShowAdmin(false);
-      }
-
-      // Load data on any session event when logged in
-      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') && session && !showAdmin) {
-        console.log("✅ Auth confirmed via", event, "- loading user data...");
-        loadProgressAndHunts(session);
-      }
-
-      if (event === 'SIGNED_OUT' || !session) {
-        setDataLoaded(true);
-      }
-
-      if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("id", session.user.id)
-          .single();
-
-        if (!profile) {
-          await supabase.from("profiles").insert({
-            id: session.user.id,
-            username: session.user.email?.split("@")[0] || `hunter_${Date.now().toString(36)}`,
-            full_name: session.user.user_metadata.full_name || null,
-          });
-        }
-      }
-    });
-
-    return () => listener?.subscription.unsubscribe();
-  }, [showAdmin, loadProgressAndHunts]);
-
   // ─── LOAD USER DATA ─────────────────────
   const loadProgressAndHunts = useCallback(async (currentSession) => {
     if (!currentSession?.user?.id) {
@@ -335,11 +255,90 @@ export default function App() {
     }
   }, [showAdmin]);
 
+  // ─── AUTH & DATA LOADING ─────────────────────
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error("Session error:", error);
+          setSessionLoading(false);
+          setDataLoaded(true);
+          return;
+        }
+
+        console.log("Session check complete:", currentSession ? "Has session" : "No session");
+        
+        setSession(currentSession);
+        
+        if (currentSession?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+          setIsAdmin(true);
+        }
+        
+        if (!currentSession) {
+          setDataLoaded(true);
+        }
+      } catch (err) {
+        console.error("Auth initialization error:", err);
+        setSession(null);
+        setDataLoaded(true);
+      } finally {
+        setSessionLoading(false);
+      }
+    };
+
+    initAuth();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("Auth state changed:", event, session ? "Has session" : "No session");
+      
+      setSession(session);
+      setSessionLoading(false);
+
+      if (session?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+        setIsAdmin(true);
+      } else {
+        setIsAdmin(false);
+        setShowAdmin(false);
+      }
+
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') && session && !showAdmin) {
+        console.log("✅ Auth confirmed via", event, "- loading user data...");
+        loadProgressAndHunts(session);
+      }
+
+      if (event === 'SIGNED_OUT' || !session) {
+        setDataLoaded(true);
+      }
+
+      if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("id", session.user.id)
+          .single();
+
+        if (!profile) {
+          await supabase.from("profiles").insert({
+            id: session.user.id,
+            username: session.user.email?.split("@")[0] || `hunter_${Date.now().toString(36)}`,
+            full_name: session.user.user_metadata.full_name || null,
+          });
+        }
+      }
+    });
+
+    return () => listener?.subscription.unsubscribe();
+  }, [showAdmin, loadProgressAndHunts]);
+
   // Sorted and filtered hunts with trim logic
   const sortedAndFilteredHunts = hunts
     .filter((h) => !completed.includes(h.id))
     .filter((h) => activeFilter === "All" || h.category === activeFilter)
-    .filter((h) => h.trim_color !== "gold" || totalHunts >= 10) // Hide gold if <10 completed
+    .filter((h) => h.trim_color !== "gold" || totalHunts >= 10)
     .sort((a, b) => {
       const order = { purple: 0, blue: 1, green: 2, none: 3, gold: 4 };
       return order[a.trim_color || "none"] - order[b.trim_color || "none"];
