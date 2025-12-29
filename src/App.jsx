@@ -151,7 +151,7 @@ export default function App() {
   const [newHuntPhoto, setNewHuntPhoto] = useState(null);
   const [creatingHunt, setCreatingHunt] = useState(false);
 
-  // ─── AUTH & PROFILE AUTO-CREATE ─────────────────────
+  // ─── AUTH & DATA LOADING ─────────────────────
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -168,11 +168,6 @@ export default function App() {
 
         console.log("Session check complete:", currentSession ? "Has session" : "No session");
         
-        if (currentSession) {
-          console.log("ℹ️  Already logged in as:", currentSession.user.email);
-          console.log("ℹ️  To see login screen, click the logout button");
-        }
-        
         setSession(currentSession);
         
         if (currentSession?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
@@ -188,22 +183,14 @@ export default function App() {
         setDataLoaded(true);
       } finally {
         setSessionLoading(false);
-        
-        setTimeout(() => {
-          if (sessionLoading || !dataLoaded) {
-            console.warn("Auth load timed out - forcing login screen");
-            setSession(null);
-            setSessionLoading(false);
-            setDataLoaded(true);
-          }
-        }, 15000);
       }
     };
 
     initAuth();
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      console.log("Auth state changed:", _event, session ? "Has session" : "No session");
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("Auth state changed:", event, session ? "Has session" : "No session");
+      
       setSession(session);
       setSessionLoading(false);
 
@@ -214,7 +201,19 @@ export default function App() {
         setShowAdmin(false);
       }
 
-      if (session) {
+      // Load data ONLY when token is fresh/confirmed
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session && !showAdmin) {
+        console.log("✅ Auth confirmed via", event, "- loading user data...");
+        loadProgressAndHunts();
+      }
+
+      // On sign out or no session
+      if (event === 'SIGNED_OUT' || !session) {
+        setDataLoaded(true);
+      }
+
+      // Auto-create profile on sign-in events
+      if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
         const { data: profile } = await supabase
           .from("profiles")
           .select("id")
@@ -228,13 +227,11 @@ export default function App() {
             full_name: session.user.user_metadata.full_name || null,
           });
         }
-      } else {
-        setDataLoaded(true);
       }
     });
 
     return () => listener?.subscription.unsubscribe();
-  }, []);
+  }, [showAdmin]);
 
   // ─── LOAD USER DATA ─────────────────────
   const loadProgressAndHunts = useCallback(async () => {
@@ -301,7 +298,7 @@ export default function App() {
         setLastActive(null);
       }
 
-      // Load active hunts
+      console.log("🔍 DEBUG: Fetching active hunts");
       const now = new Date().toISOString();
       const { data: huntsData, error: huntsError } = await supabase
         .from("hunts")
@@ -309,68 +306,27 @@ export default function App() {
         .gte("expiry_date", now)
         .order("date", { ascending: false });
 
+      console.log("🔍 DEBUG: hunts result → data:", huntsData, "error:", huntsError);
+
       if (huntsError) throw huntsError;
 
       setHunts(huntsData || []);
       console.log("✅ Data loaded successfully -", (huntsData?.length || 0), "active hunts found");
-      if ((huntsData || []).length === 0) {
-        console.log("ℹ️ No active hunts currently available");
-      }
     } catch (e) {
       console.error("❌ Load error:", e);
       setError("Failed to load hunts – check connection or try refresh.");
-      setHunts([]); // Force empty state on error
+      setHunts([]);
     } finally {
       setDataLoaded(true);
     }
   }, [session, showAdmin]);
-
-  // Initial load when session is FULLY ready (fixes refresh issue)
-  useEffect(() => {
-    if (sessionLoading) {
-      console.log("⏳ Still loading session...");
-      return;
-    }
-
-    if (!session) {
-      console.log("🔓 No session - showing login screen");
-      setDataLoaded(true);
-      return;
-    }
-
-    if (showAdmin) {
-      console.log("🔧 Admin mode - skipping data load");
-      setDataLoaded(true);
-      return;
-    }
-
-    // Critical fix: Force token refresh/validation before loading data
-    const loadDataSafely = async () => {
-      console.log("✅ Valid session found - confirming auth...");
-
-      const { data: { user }, error } = await supabase.auth.getUser();
-
-      if (error || !user) {
-        console.error("❌ Auth confirmation failed:", error);
-        // Fallback: force logout/show login screen
-        setSession(null);
-        setDataLoaded(true);
-        return;
-      }
-
-      console.log("✅ Auth fully confirmed - loading user data...");
-      loadProgressAndHunts();
-    };
-
-    loadDataSafely();
-  }, [session, sessionLoading, showAdmin, loadProgressAndHunts]);
 
   // Filtered hunts
   const filteredHunts = hunts
     .filter((h) => !completed.includes(h.id))
     .filter((h) => activeFilter === "All" || h.category === activeFilter);
 
-  // Realtime updates (no loading flicker)
+  // Realtime updates
   useEffect(() => {
     if (!session || showAdmin) return;
 
@@ -1219,7 +1175,6 @@ export default function App() {
   // ─── MAIN DASHBOARD ─────────────────────
   return (
     <div className="min-h-screen bg-gradient-to-b from-amber-100 to-amber-50">
-      {/* HEADER */}
       <div className="bg-white/80 backdrop-blur-lg shadow-lg p-4 md:p-6 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <h1 className="text-2xl md:text-4xl font-black text-amber-900">Brew Hunt</h1>
@@ -1243,7 +1198,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* ERROR BANNER */}
       {error && (
         <div className="max-w-7xl mx-auto px-4 md:px-6 pt-4 md:pt-6">
           <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-3 md:p-4 flex items-start gap-2 md:gap-3">
@@ -1258,7 +1212,6 @@ export default function App() {
         </div>
       )}
 
-      {/* FILTERS */}
       <div className="max-w-7xl mx-auto px-4 md:px-6 pt-4 md:pt-6">
         <div className="flex flex-wrap gap-2 md:gap-3 justify-center mb-6 md:mb-8">
           {["All", "Café", "Barber", "Restaurant", "Gig", "Museum"].map((cat) => (
@@ -1276,7 +1229,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* HUNTS GRID */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6 pb-16 md:pb-24">
           {filteredHunts.length === 0 ? (
             <div className="col-span-2 lg:col-span-4 text-center py-8 md:py-12 bg-white rounded-3xl shadow-xl p-6 md:p-8">
@@ -1332,7 +1284,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* PROFILE MODAL */}
       {showProfileModal && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4 md:p-6">
           <div className="bg-white rounded-3xl shadow-2xl p-8 md:p-12 max-w-md w-full text-center relative max-h-[90vh] overflow-y-auto">
@@ -1379,7 +1330,6 @@ export default function App() {
         </div>
       )}
 
-      {/* COMPLETED HUNTS MODAL */}
       {showCompletedModal && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4 md:p-6">
           <div className="bg-white rounded-3xl shadow-2xl p-8 md:p-12 max-w-md w-full text-center relative max-h-[90vh] overflow-y-auto">
@@ -1418,7 +1368,6 @@ export default function App() {
         </div>
       )}
 
-      {/* SELFIE MODAL */}
       {showModal && currentHunt && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4 md:p-6">
           <div className="bg-white rounded-3xl shadow-2xl p-8 md:p-12 max-w-md w-full text-center relative">
@@ -1473,7 +1422,6 @@ export default function App() {
         </div>
       )}
 
-      {/* LEADERBOARD MODAL */}
       {showLeaderboard && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4 md:p-6">
           <div className="bg-white rounded-3xl shadow-2xl p-8 md:p-12 max-w-md w-full text-center relative">
