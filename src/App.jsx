@@ -290,8 +290,7 @@ export default function App() {
       }
 
       // Load data ONLY when token is fresh/confirmed, using the session from callback
-      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') && session && !showAdmin) {
-        console.log("✅ Auth confirmed via", event, "- loading user data...");
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') && session && !showAdmin) {        
         loadProgressAndHunts(session);
       }
 
