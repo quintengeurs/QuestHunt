@@ -325,7 +325,7 @@ export default function App() {
     }
   }, [session, showAdmin]);
 
-  // Initial load when session is CONFIRMED ready
+  // Initial load when session is FULLY ready (fixes refresh issue)
   useEffect(() => {
     if (sessionLoading) {
       console.log("⏳ Still loading session...");
@@ -344,19 +344,25 @@ export default function App() {
       return;
     }
 
-    // Extra safety: confirm user is fully loaded (handles token refresh on page load)
-    const confirmUser = async () => {
+    // Critical fix: Force token refresh/validation before loading data
+    const loadDataSafely = async () => {
+      console.log("✅ Valid session found - confirming auth...");
+
       const { data: { user }, error } = await supabase.auth.getUser();
+
       if (error || !user) {
-        console.error("User confirmation failed:", error);
-        setDataLoaded(true); // fallback to login
+        console.error("❌ Auth confirmation failed:", error);
+        // Fallback: force logout/show login screen
+        setSession(null);
+        setDataLoaded(true);
         return;
       }
-      console.log("✅ User fully confirmed - loading data...");
+
+      console.log("✅ Auth fully confirmed - loading user data...");
       loadProgressAndHunts();
     };
 
-    confirmUser();
+    loadDataSafely();
   }, [session, sessionLoading, showAdmin, loadProgressAndHunts]);
 
   // Filtered hunts
