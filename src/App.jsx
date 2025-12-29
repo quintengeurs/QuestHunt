@@ -30,6 +30,21 @@ const getSafePhotoUrl = (url) => {
   return "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=800&h=600&fit=crop";
 };
 
+const getTrimClass = (trim) => {
+  switch (trim) {
+    case "green":
+      return "ring-4 ring-green-500";
+    case "blue":
+      return "ring-4 ring-blue-500";
+    case "purple":
+      return "ring-4 ring-purple-600";
+    case "gold":
+      return "ring-4 ring-yellow-500";
+    default:
+      return "";
+  }
+};
+
 function calculateDistance(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -149,7 +164,88 @@ export default function App() {
   const [newHuntRadius, setNewHuntRadius] = useState("50");
   const [newHuntDuration, setNewHuntDuration] = useState("1day");
   const [newHuntPhoto, setNewHuntPhoto] = useState(null);
+  const [newHuntTrim, setNewHuntTrim] = useState("none");
   const [creatingHunt, setCreatingHunt] = useState(false);
+
+  // ─── AUTH & DATA LOADING ─────────────────────
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error("Session error:", error);
+          setSessionLoading(false);
+          setDataLoaded(true);
+          return;
+        }
+
+        console.log("Session check complete:", currentSession ? "Has session" : "No session");
+        
+        setSession(currentSession);
+        
+        if (currentSession?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+          setIsAdmin(true);
+        }
+        
+        if (!currentSession) {
+          setDataLoaded(true);
+        }
+      } catch (err) {
+        console.error("Auth initialization error:", err);
+        setSession(null);
+        setDataLoaded(true);
+      } finally {
+        setSessionLoading(false);
+      }
+    };
+
+    initAuth();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("Auth state changed:", event, session ? "Has session" : "No session");
+      
+      setSession(session);
+      setSessionLoading(false);
+
+      if (session?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+        setIsAdmin(true);
+      } else {
+        setIsAdmin(false);
+        setShowAdmin(false);
+      }
+
+      // Load data on any session event when logged in
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') && session && !showAdmin) {
+        console.log("✅ Auth confirmed via", event, "- loading user data...");
+        loadProgressAndHunts(session);
+      }
+
+      if (event === 'SIGNED_OUT' || !session) {
+        setDataLoaded(true);
+      }
+
+      if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("id", session.user.id)
+          .single();
+
+        if (!profile) {
+          await supabase.from("profiles").insert({
+            id: session.user.id,
+            username: session.user.email?.split("@")[0] || `hunter_${Date.now().toString(36)}`,
+            full_name: session.user.user_metadata.full_name || null,
+          });
+        }
+      }
+    });
+
+    return () => listener?.subscription.unsubscribe();
+  }, [showAdmin, loadProgressAndHunts]);
 
   // ─── LOAD USER DATA ─────────────────────
   const loadProgressAndHunts = useCallback(async (currentSession) => {
@@ -239,92 +335,15 @@ export default function App() {
     }
   }, [showAdmin]);
 
-  // ─── AUTH & DATA LOADING ─────────────────────
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        const { data: { session: currentSession }, error } = await supabase.auth.getSession();
-        
-        if (error) {
-          console.error("Session error:", error);
-          setSessionLoading(false);
-          setDataLoaded(true);
-          return;
-        }
-
-        console.log("Session check complete:", currentSession ? "Has session" : "No session");
-        
-        setSession(currentSession);
-        
-        if (currentSession?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-          setIsAdmin(true);
-        }
-        
-        if (!currentSession) {
-          setDataLoaded(true);
-        }
-      } catch (err) {
-        console.error("Auth initialization error:", err);
-        setSession(null);
-        setDataLoaded(true);
-      } finally {
-        setSessionLoading(false);
-      }
-    };
-
-    initAuth();
-
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Auth state changed:", event, session ? "Has session" : "No session");
-      
-      setSession(session);
-      setSessionLoading(false);
-
-      if (session?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-        setIsAdmin(true);
-      } else {
-        setIsAdmin(false);
-        setShowAdmin(false);
-      }
-
-      // Load data ONLY when token is fresh/confirmed, using the session from callback
-      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') && session && !showAdmin) {
-        console.log("✅ Auth confirmed via", event, "- loading user data...");
-        loadProgressAndHunts(session);
-      }
-
-      // On sign out
-      if (event === 'SIGNED_OUT' || !session) {
-        setDataLoaded(true);
-      }
-
-      // Auto-create profile
-      if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("id", session.user.id)
-          .single();
-
-        if (!profile) {
-          await supabase.from("profiles").insert({
-            id: session.user.id,
-            username: session.user.email?.split("@")[0] || `hunter_${Date.now().toString(36)}`,
-            full_name: session.user.user_metadata.full_name || null,
-          });
-        }
-      }
-    });
-
-    return () => listener?.subscription.unsubscribe();
-  }, [showAdmin, loadProgressAndHunts]);
-
-  // Filtered hunts
-  const filteredHunts = hunts
+  // Sorted and filtered hunts with trim logic
+  const sortedAndFilteredHunts = hunts
     .filter((h) => !completed.includes(h.id))
-    .filter((h) => activeFilter === "All" || h.category === activeFilter);
+    .filter((h) => activeFilter === "All" || h.category === activeFilter)
+    .filter((h) => h.trim_color !== "gold" || totalHunts >= 10) // Hide gold if <10 completed
+    .sort((a, b) => {
+      const order = { purple: 0, blue: 1, green: 2, none: 3, gold: 4 };
+      return order[a.trim_color || "none"] - order[b.trim_color || "none"];
+    });
 
   // Realtime updates
   useEffect(() => {
@@ -365,6 +384,24 @@ export default function App() {
       supabase.removeChannel(progressChannel);
     };
   }, [session, showAdmin, loadProgressAndHunts]);
+
+  // ─── TRIM LIMIT VALIDATION ─────────────────────
+  const validateTrimLimit = async (category, trim, excludeId = null) => {
+    if (trim === "none" || trim === "gold") return true;
+
+    const { data, error } = await supabase
+      .from("hunts")
+      .select("id")
+      .eq("category", category)
+      .eq("trim_color", trim);
+
+    if (error) return false;
+
+    const count = data.filter(h => h.id !== excludeId).length;
+
+    const limits = { green: 5, blue: 3, purple: 1 };
+    return count < limits[trim];
+  };
 
   // ─── SELFIE UPLOAD ─────────────────────
   const uploadSelfie = useCallback(async () => {
@@ -557,6 +594,12 @@ export default function App() {
       return;
     }
 
+    const canAdd = await validateTrimLimit(newHuntCategory || "Food & Drink", newHuntTrim);
+    if (!canAdd) {
+      alert(`Cannot add more ${newHuntTrim} trimmed hunts in this category`);
+      return;
+    }
+
     setCreatingHunt(true);
     try {
       let photoUrl = null;
@@ -591,6 +634,7 @@ export default function App() {
         lat,
         lon,
         radius: parseInt(newHuntRadius) || 50,
+        trim_color: newHuntTrim,
       });
 
       if (error) throw error;
@@ -606,6 +650,7 @@ export default function App() {
       setNewHuntLon("");
       setNewHuntRadius("50");
       setNewHuntDuration("1day");
+      setNewHuntTrim("none");
       setNewHuntPhoto(null);
       loadAdminData();
       setAdminTab("hunts");
@@ -617,7 +662,7 @@ export default function App() {
   }, [
     newHuntDate, newHuntCategory, newHuntRiddle, newHuntBusinessName,
     newHuntCode, newHuntDiscount, newHuntLat, newHuntLon, newHuntRadius,
-    newHuntDuration, newHuntPhoto, loadAdminData
+    newHuntDuration, newHuntPhoto, newHuntTrim, loadAdminData
   ]);
 
   // ─── ADMIN APPROVE / REJECT ─────────────────────
@@ -661,6 +706,7 @@ export default function App() {
     setNewHuntLon(hunt.lon?.toString() || "");
     setNewHuntRadius(hunt.radius?.toString() || "50");
     setNewHuntDuration(hunt.duration || "1day");
+    setNewHuntTrim(hunt.trim_color || "none");
     setNewHuntPhoto(null);
     setShowEditModal(true);
   }, []);
@@ -676,6 +722,12 @@ export default function App() {
     const lon = parseFloat(newHuntLon);
     if (isNaN(lat) || isNaN(lon)) {
       alert("Invalid coordinates");
+      return;
+    }
+
+    const canAdd = await validateTrimLimit(newHuntCategory || "Food & Drink", newHuntTrim, editingHunt.id);
+    if (!canAdd) {
+      alert(`Cannot have more than the limit of ${newHuntTrim} trimmed hunts in this category`);
       return;
     }
 
@@ -713,6 +765,7 @@ export default function App() {
         lat,
         lon,
         radius: parseInt(newHuntRadius) || 50,
+        trim_color: newHuntTrim,
       }).eq("id", editingHunt.id);
 
       if (error) throw error;
@@ -730,6 +783,7 @@ export default function App() {
       setNewHuntLon("");
       setNewHuntRadius("50");
       setNewHuntDuration("1day");
+      setNewHuntTrim("none");
       setNewHuntPhoto(null);
       loadAdminData();
     } catch (err) {
@@ -740,7 +794,7 @@ export default function App() {
   }, [
     editingHunt, newHuntDate, newHuntCategory, newHuntRiddle, newHuntBusinessName,
     newHuntCode, newHuntDiscount, newHuntLat, newHuntLon, newHuntRadius,
-    newHuntDuration, newHuntPhoto, loadAdminData
+    newHuntDuration, newHuntPhoto, newHuntTrim, loadAdminData
   ]);
 
   const deleteHunt = useCallback(async (id) => {
@@ -865,6 +919,7 @@ export default function App() {
                     <p className="text-xs md:text-sm"><strong>Date:</strong> {new Date(hunt.date).toLocaleDateString()}</p>
                     <p className="text-xs md:text-sm"><strong>Duration:</strong> {hunt.duration ? hunt.duration.replace('hour', ' hour').replace('day', ' day').replace('week', ' week') : '1 day'}</p>
                     <p className="text-xs md:text-sm mb-4"><strong>Radius:</strong> {hunt.radius}m</p>
+                    <p className="text-xs md:text-sm mb-4"><strong>Trim:</strong> {hunt.trim_color || "none"}</p>
                     <div className="flex gap-2 md:gap-3">
                       <button
                         onClick={() => startEditHunt(hunt)}
@@ -992,6 +1047,16 @@ export default function App() {
                   <input type="number" value={newHuntRadius} onChange={(e) => setNewHuntRadius(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" placeholder="50" />
                 </div>
                 <div className="md:col-span-2">
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Card Trim Color</label>
+                  <select value={newHuntTrim} onChange={(e) => setNewHuntTrim(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl">
+                    <option value="none">No Trim</option>
+                    <option value="green">Green Trim (max 5 per category)</option>
+                    <option value="blue">Blue Trim (max 3 per category)</option>
+                    <option value="purple">Purple Trim (max 1 per category - shows first)</option>
+                    <option value="gold">Gold Trim (visible only to Pro+ hunters)</option>
+                  </select>
+                </div>
+                <div className="md:col-span-2">
                   <label className="block text-sm font-bold text-gray-700 mb-2">Hunt Photo</label>
                   <input type="file" accept="image/*" onChange={(e) => setNewHuntPhoto(e.target.files?.[0] || null)} className="w-full p-4 md:p-5 border-2 border-dashed border-amber-300 rounded-2xl bg-amber-50 text-sm" />
                 </div>
@@ -1077,6 +1142,16 @@ export default function App() {
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Radius (meters)</label>
                     <input type="number" value={newHuntRadius} onChange={(e) => setNewHuntRadius(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl" />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Card Trim Color</label>
+                    <select value={newHuntTrim} onChange={(e) => setNewHuntTrim(e.target.value)} className="w-full p-4 md:p-5 border-2 border-amber-200 rounded-2xl">
+                      <option value="none">No Trim</option>
+                      <option value="green">Green Trim</option>
+                      <option value="blue">Blue Trim</option>
+                      <option value="purple">Purple Trim</option>
+                      <option value="gold">Gold Trim</option>
+                    </select>
                   </div>
                   <div className="md:col-span-2">
                     <label className="block text-sm font-bold text-gray-700 mb-2">Hunt Photo (leave empty to keep current)</label>
@@ -1226,7 +1301,7 @@ export default function App() {
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6 pb-16 md:pb-24">
-          {filteredHunts.length === 0 ? (
+          {sortedAndFilteredHunts.length === 0 ? (
             <div className="col-span-2 lg:col-span-4 text-center py-8 md:py-12 bg-white rounded-3xl shadow-xl p-6 md:p-8">
               <p className="text-base md:text-xl text-gray-600 mb-3 md:mb-4">
                 No {activeFilter === "All" ? "" : activeFilter} hunts available right now
@@ -1234,8 +1309,8 @@ export default function App() {
               <p className="text-sm md:text-base text-gray-500">Check back soon for new adventures!</p>
             </div>
           ) : (
-            filteredHunts.map((hunt) => (
-              <div key={hunt.id} className="bg-white rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden hover:shadow-3xl transition">
+            sortedAndFilteredHunts.map((hunt) => (
+              <div key={hunt.id} className={`bg-white rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden hover:shadow-3xl transition ${getTrimClass(hunt.trim_color)}`}>
                 <div className="relative">
                   <img
                     src={getSafePhotoUrl(hunt.photo)}
